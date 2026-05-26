@@ -1,8 +1,70 @@
+# --- Python ---
 __pycache__/
-*.pyc
-settings.json
-sessions/
-smoke-session/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+.installed.cfg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Build / packaging ---
 build/
 dist/
 *.spec
+*.manifest
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Runtime data (sensitive — never commit) ---
+settings.json
+sessions/
+smoke-session/
+*.log
+logs/
+
+# --- Screenshots / personal media ---
+*.heic
+*.HEIC
+屏幕截图*.png
+Screenshot*.png
+screen-*.png
+
+# --- Local secrets ---
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# --- Misc ---
+*.bak
+*.tmp
+*.orig

@@ -1,0 +1,43 @@
+{
+  "_comment": "Copy this file to settings.json and fill in your own values. settings.json is gitignored and must never be committed.",
+  "_comment_provider_kind": "openai_compatible | official_compatible | semi_official | anthropic_official",
+
+  "provider_kind": "openai_compatible",
+  "base_url": "https://api.openai.com",
+  "api_key": "REPLACE_ME_WITH_YOUR_OWN_KEY",
+  "model": "REPLACE_ME_WITH_YOUR_MODEL_NAME",
+
+  "anthropic_version": "2023-06-01",
+  "anthropic_beta": "computer-use-2025-01-24",
+  "anthropic_tool_type": "computer_20250124",
+
+  "max_tokens": "4096",
+  "enable_thinking": false,
+  "thinking_intensity": "medium",
+  "thinking_budget": "2048",
+  "enable_compact": false,
+
+  "target_resolution": "1280x720",
+  "jpeg_quality": "70",
+  "max_steps": "30",
+  "confirm_actions": false,
+  "hide_window_while_running": true,
+  "enable_visual_feedback": true,
+  "visual_theme": "default",
+
+  "browser_dom_enabled": false,
+  "browser_dom_first": false,
+  "browser_debug_host": "127.0.0.1",
+  "browser_debug_port": "9222",
+
+  "advisor_enabled": false,
+  "advisor_mode": "inherit",
+  "advisor_base_url": "",
+  "advisor_api_key": "",
+  "advisor_model": "claude-opus-4-7",
+
+  "extra_headers_json": "{}",
+  "extra_body_json": "{}",
+
+  "last_task": ""
+}

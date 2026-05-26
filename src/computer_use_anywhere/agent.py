@@ -8,16 +8,25 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .browser_dom import BrowserDomController
-from .models import AgentEvent, PROVIDER_OFFICIAL_COMPATIBLE, ProviderConfig, SessionConfig
-from .provider import AnthropicOfficialProvider, OpenAICompatibleProvider, create_provider
+from .models import (
+    AgentEvent,
+    AGENT_STATE_ADVISOR_IDLE,
+    AGENT_STATE_MAIN_IDLE,
+    PROVIDER_OFFICIAL_COMPATIBLE,
+    PROVIDER_SEMI_OFFICIAL,
+    ProviderConfig,
+    SessionConfig,
+)
+from .provider import AnthropicOfficialProvider, OpenAICompatibleProvider, SemiOfficialProvider, create_provider, guess_anthropic_computer_contract
 from .replay import ActionVerification, SessionReplay, verify_action_result
+from .skills import SkillRegistry, built_in_skills
 from .windows_control import WindowsDesktopController
 
 
 EventCallback = Callable[[AgentEvent], None]
 ConfirmCallback = Callable[[str], bool]
 
-AGENT_WINDOW_TITLE = "Claude 电脑操作代理"
+AGENT_WINDOW_TITLE = "Computer Use Anywhere"
 
 
 def build_system_prompt(
@@ -227,6 +236,8 @@ class ComputerUseAgent:
     ) -> None:
         self.provider_config = provider_config
         self.provider = create_provider(provider_config)
+        self.advisor_provider = self._create_advisor_provider(provider_config)
+        self.advisor_model_name = (provider_config.advisor_model or "claude-opus-4-7") if provider_config.advisor_enabled else ""
         if isinstance(self.provider, AnthropicOfficialProvider) and not session_config.official_enhanced:
             session_config.mask_own_window = False
         self.desktop = WindowsDesktopController(session_config)
@@ -236,13 +247,47 @@ class ComputerUseAgent:
         self.stop_event = stop_event or threading.Event()
         self.confirm_callback = confirm_callback
         self.replay: SessionReplay | None = None
+        self.skill_registry = built_in_skills()
+
+    def _create_advisor_provider(self, main_config: ProviderConfig):
+        if not main_config.advisor_enabled:
+            return None
+        advisor_config = ProviderConfig(
+            provider_kind=main_config.provider_kind,
+            base_url=main_config.advisor_base_url or main_config.base_url,
+            api_key=main_config.advisor_api_key or main_config.api_key,
+            model=main_config.advisor_model or "claude-opus-4-7",
+            max_tokens=main_config.advisor_max_tokens,
+            temperature=main_config.advisor_temperature,
+            extra_headers=dict(main_config.extra_headers),
+            extra_body=dict(main_config.extra_body),
+            anthropic_version=main_config.anthropic_version,
+            anthropic_beta=main_config.anthropic_beta,
+            anthropic_tool_type=main_config.anthropic_tool_type,
+            enable_thinking=True,
+            thinking_intensity="high",
+            enable_compact=True,
+        )
+        return create_provider(advisor_config)
 
     def run(self, task: str) -> dict[str, Any]:
+        # Auto-detect model family hint if set to auto
+        if self.session_config.model_family_hint == "auto":
+            model = self.provider_config.model.lower()
+            if "opus-4.7" in model or "opus 4.7" in model or "opus4.7" in model:
+                self.session_config.model_family_hint = "opus_4_7"
+            elif "4.6" in model or "4-6" in model or "haiku-4.5" in model:
+                self.session_config.model_family_hint = "claude_4_6"
+            else:
+                self.session_config.model_family_hint = "claude_4_6"
         initial = self.desktop.capture_snapshot("initial")
         self.replay = SessionReplay(self.desktop.session_root)
         tools = self.provider.build_tools(initial.width, initial.height)
-        official_mode = isinstance(self.provider, AnthropicOfficialProvider)
+        # Append built-in skill tool schemas
+        tools.extend(self.skill_registry.get_tool_schemas())
+        official_mode = isinstance(self.provider, (AnthropicOfficialProvider, SemiOfficialProvider))
         official_compatible_mode = self.provider_config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE
+        semi_official_mode = self.provider_config.provider_kind == PROVIDER_SEMI_OFFICIAL
         enhanced_guards = (not official_mode) or self.session_config.official_enhanced
         if official_mode or official_compatible_mode or not self.session_config.browser_dom_enabled:
             tools = [tool for tool in tools if tool.get("function", {}).get("name") != "browser_dom"]
@@ -301,18 +346,40 @@ class ComputerUseAgent:
         latest_snapshot = initial
         browser_dom_attempted = False
         browser_dom_guard_used = False
+        use_advisor_next = False
+        advisor_step_count = 0
         for step in range(1, self.session_config.max_steps + 1):
             if self.stop_event.is_set():
                 final_text = "已按用户要求停止。"
                 self._emit("warning", final_text)
                 break
 
-            self._emit("status", f"第 {step}/{self.session_config.max_steps} 步：正在请求下一步动作。")
+            current_provider = self.advisor_provider if use_advisor_next and self.advisor_provider else self.provider
+            provider_name = f"顾问({self.advisor_model_name})" if use_advisor_next and self.advisor_provider else "主模型"
+            # 可视化反馈：根据当前是否走顾问通道选 agent_state；status 阶段处于等待模型返回，归为 *_IDLE。
+            status_agent_state = (
+                AGENT_STATE_ADVISOR_IDLE
+                if (use_advisor_next and self.advisor_provider)
+                else AGENT_STATE_MAIN_IDLE
+            )
+            self._emit(
+                "status",
+                f"第 {step}/{self.session_config.max_steps} 步：正在请求{provider_name}下一步动作。",
+                payload={
+                    "agent_state": status_agent_state,
+                    "step_n": step,
+                    "step_total": self.session_config.max_steps,
+                },
+            )
             request_started_at = time.perf_counter()
-            reply = self.provider.complete(messages, tools, system_prompt=system_prompt if official_mode else None)
+            reply = current_provider.complete(messages, tools, system_prompt=system_prompt if official_mode else None)
             thought_seconds = max(0.0, time.perf_counter() - request_started_at)
             if reply.assistant_message:
                 messages.append(reply.assistant_message)
+            if use_advisor_next and self.advisor_provider:
+                self._emit("analysis", f"顾问模型({self.advisor_model_name}) 介入处理上一步失败。思考 {thought_seconds:.1f} 秒。")
+                use_advisor_next = False
+                advisor_step_count += 1
 
             if reply.text:
                 self._emit(
@@ -356,6 +423,32 @@ class ComputerUseAgent:
                         result_message=result_message,
                         snapshot=snapshot,
                         followup_text=f"{self._desktop_state_text(snapshot)}\n已附上最新截图。请继续下一步；如果网页任务完成，请用简体中文回答。",
+                    )
+                )
+                continue
+            if call.name not in {"computer"} and self.skill_registry._skills.get(call.name):
+                before_snapshot = latest_snapshot
+                result = self.skill_registry.execute(call.name, call.arguments)
+                result_text = json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
+                snapshot = self.desktop.capture_snapshot(f"skill_{call.name}")
+                latest_snapshot = snapshot
+                self._emit("tool", f"Skill {call.name} 结果：{result_text[:200]}")
+                self._record_replay_step(
+                    step=step,
+                    tool_name=call.name,
+                    arguments=call.arguments,
+                    result_message=result_text,
+                    before_snapshot=before_snapshot,
+                    after_snapshot=snapshot,
+                    model_text=reply.text,
+                    public_reasoning=self._public_reasoning(reply.text, reply.reasoning_summary, call.arguments),
+                )
+                messages.extend(
+                    self.provider.build_tool_result_messages(
+                        call_id=call.call_id,
+                        result_message=result_text,
+                        snapshot=snapshot,
+                        followup_text=f"Skill {call.name} 执行结果：{result_text}\n{self._desktop_state_text(snapshot)}",
                     )
                 )
                 continue
@@ -439,6 +532,7 @@ class ComputerUseAgent:
                         followup_text=tool_text,
                     )
                 )
+                use_advisor_next = True
                 continue
             action_summary = self.desktop.describe(arguments)
             self._emit(
@@ -477,6 +571,7 @@ class ComputerUseAgent:
                         followup_text=tool_text,
                     )
                 )
+                use_advisor_next = True
                 continue
 
             if enhanced_guards and self.desktop.is_action_targeting_masked_region(arguments):
@@ -503,6 +598,7 @@ class ComputerUseAgent:
                         followup_text=tool_text,
                     )
                 )
+                use_advisor_next = True
                 continue
 
             pre_execution_notes: list[str] = []
@@ -536,6 +632,7 @@ class ComputerUseAgent:
                         followup_text=tool_text,
                     )
                 )
+                use_advisor_next = True
                 continue
 
             if self.session_config.confirm_actions and arguments.get("action") not in {"screenshot", "wait", "activate_window"}:
@@ -602,7 +699,21 @@ class ComputerUseAgent:
                         followup_text=error_followup,
                     )
                 )
+                use_advisor_next = True
                 continue
+            # 可视化反馈：execute 成功后补发一个带 action_kind 的 tool 事件，
+            # 让 overlay 能拿到物理坐标和动作类型来画波纹/切状态。
+            # 原 emit 不动；这里是额外的一条，payload 字段优先使用 ActionResult 的元数据。
+            if result.action_kind:
+                self._emit(
+                    "tool",
+                    f"已执行：{action_summary}",
+                    payload={
+                        "action_kind": result.action_kind,
+                        "physical_coord": result.physical_coord,
+                        "action_extra": result.action_extra,
+                    },
+                )
             change_text = self.desktop.describe_snapshot_change(latest_snapshot, result.snapshot)
             result_message = "\n".join([*pre_execution_notes, result.message, change_text])
             latest_snapshot = result.snapshot
@@ -619,15 +730,42 @@ class ComputerUseAgent:
             )
             if verification.status == "warn":
                 self._emit("warning", f"动作验证：{verification.message}")
+                if "几乎没有变化" in verification.message or "变化很小" in verification.message:
+                    use_advisor_next = True
+            # RegionFocus 钩子: 点击类动作 + 画面几乎无变化 + 有合法坐标 时,
+            # 在 result.snapshot 上画红框 + 右下角拼放大区域,让下一轮 (顾问) 模型
+            # 看到"我应该重新看哪儿"。其他场景沿用普通 snapshot,不增加开销。
+            click_xy_for_focus = self._extract_click_coordinate(arguments) if verification.status == "warn" and use_advisor_next else None
+            action_for_focus = str(arguments.get("action") or "").strip().lower()
+            region_focus_enabled = (
+                click_xy_for_focus is not None
+                and action_for_focus in {"left_click", "click", "double_click", "right_click", "middle_click"}
+                and ("几乎没有变化" in verification.message or "变化很小" in verification.message)
+            )
+            outbound_snapshot = result.snapshot
+            region_focus_hint = ""
+            if region_focus_enabled:
+                try:
+                    outbound_snapshot = self.desktop.make_region_focus_snapshot(result.snapshot, click_xy_for_focus)
+                    region_focus_hint = (
+                        f"\n[RegionFocus 提示] 上次点击 ({click_xy_for_focus[0]},{click_xy_for_focus[1]}) 后画面几乎无变化。"
+                        f"附图右下角是该点周围 ±{96}px 的放大区域,红框/十字标出了上次点击位置。"
+                        f"**请放大看清楚:那个位置真的有可点击元素吗?** 如果没有,请在放大区域内重新挑选正确的目标像素坐标 (注意:坐标仍按全局截图尺寸给)。"
+                        f"如果该位置确有目标但 UI 反应慢,改用 wait()。"
+                    )
+                    self._emit("analysis", "已启用 RegionFocus:在截图右下角拼了点击点附近的放大区域。")
+                except Exception:
+                    outbound_snapshot = result.snapshot
+                    region_focus_hint = ""
             if official_mode and not self.session_config.official_enhanced:
                 followup_text = (
-                    f"工具执行结果：{result.message}\n"
+                    f"工具执行结果：{result.message}{region_focus_hint}\n"
                     "已附上最新截图。请严格按官方 computer use 流程继续；如果任务已经完成，请直接用简体中文回答。"
                 )
                 tool_result_message = result.message
             else:
                 followup_text = (
-                    f"工具执行结果：{result_message}\n"
+                    f"工具执行结果：{result_message}{region_focus_hint}\n"
                     f"{self._desktop_state_text(result.snapshot)}\n"
                     f"再次提醒：如果截图里还有“{AGENT_WINDOW_TITLE}”窗口或它的预览区域，必须忽略，不能把它当任务目标。\n"
                     "已附上最新截图。请继续只选择一个下一步动作；如果上一步没有达到预期，必须根据这张最新截图修正。"
@@ -638,7 +776,7 @@ class ComputerUseAgent:
                 self.provider.build_tool_result_messages(
                     call_id=call.call_id,
                     result_message=tool_result_message,
-                    snapshot=result.snapshot,
+                    snapshot=outbound_snapshot,
                     followup_text=followup_text,
                 )
             )
@@ -794,6 +932,30 @@ class ComputerUseAgent:
         if official_reasoning:
             return official_reasoning
         return ""
+
+    @staticmethod
+    def _extract_click_coordinate(arguments: dict[str, Any]) -> tuple[int, int] | None:
+        """从 computer 动作参数里抽出 (x,y),供 RegionFocus / 微验证使用。
+
+        优先 coordinate;其次 start_coordinate (drag 起点);最后 end_coordinate。
+        返回 None 表示参数里没合法坐标。
+        """
+        for key in ("coordinate", "start_coordinate", "end_coordinate"):
+            raw = arguments.get(key)
+            if isinstance(raw, (list, tuple)) and len(raw) == 2:
+                try:
+                    return (int(raw[0]), int(raw[1]))
+                except (TypeError, ValueError):
+                    continue
+            if isinstance(raw, dict):
+                x = raw.get("x", raw.get("X"))
+                y = raw.get("y", raw.get("Y"))
+                if x is not None and y is not None:
+                    try:
+                        return (int(x), int(y))
+                    except (TypeError, ValueError):
+                        continue
+        return None
 
     def _emit(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import ctypes
 import io
+import math
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -11,7 +12,61 @@ from ctypes import wintypes
 
 from PIL import Image, ImageChops, ImageDraw, ImageGrab, ImageStat
 
-from .models import ActionResult, SessionConfig, Snapshot
+from .models import (
+    ACTION_DOUBLE_CLICK,
+    ACTION_DRAG_END,
+    ACTION_KEY_PRESS,
+    ACTION_LEFT_CLICK,
+    ACTION_MIDDLE_CLICK,
+    ACTION_MOVE_ONLY,
+    ACTION_RIGHT_CLICK,
+    ACTION_SCROLL_DOWN,
+    ACTION_SCROLL_UP,
+    ACTION_TYPE_TEXT,
+    ActionResult,
+    SessionConfig,
+    Snapshot,
+)
+
+
+# Anthropic API limits per model family (May 2026 best practices)
+CLAUDE_4_6_MAX_LONG_EDGE = 1568
+CLAUDE_4_6_MAX_PIXELS = 1_150_000
+OPUS_4_7_MAX_LONG_EDGE = 2576
+OPUS_4_7_MAX_PIXELS = 3_750_000
+
+
+def compute_max_api_fit(native_w: int, native_h: int, max_long_edge: int, max_pixels: int) -> tuple[int, int]:
+    """Calculate the optimal downscaled resolution that uses full API pixel budget without distortion."""
+    aspect = native_w / native_h
+    h_from_pixels = math.sqrt(max_pixels / aspect)
+    w_from_pixels = h_from_pixels * aspect
+    if native_w >= native_h:
+        w = min(w_from_pixels, max_long_edge)
+        h = w / aspect
+    else:
+        h = min(h_from_pixels, max_long_edge)
+        w = h * aspect
+    w = min(w, native_w)
+    h = min(h, native_h)
+    return max(1, int(w)), max(1, int(h))
+
+
+def resolve_capture_resolution(actual_w: int, actual_h: int, target_resolution: str, model_family: str = "auto") -> tuple[int, int]:
+    """Resolve the final screenshot dimensions based on target resolution strategy."""
+    if target_resolution == "1280x720":
+        return 1280, 720
+    if target_resolution == "1920x1080":
+        return 1920, 1080
+    if target_resolution == "max_api_fit":
+        family = model_family.lower()
+        if "opus_4_7" in family or "opus-4.7" in family or "opus 4.7" in family:
+            return compute_max_api_fit(actual_w, actual_h, OPUS_4_7_MAX_LONG_EDGE, OPUS_4_7_MAX_PIXELS)
+        # Default to Claude 4.6 family limits for safety
+        return compute_max_api_fit(actual_w, actual_h, CLAUDE_4_6_MAX_LONG_EDGE, CLAUDE_4_6_MAX_PIXELS)
+    # Legacy scale mode: keep proportional scaling
+    scale = float(target_resolution) if target_resolution.replace(".", "").isdigit() else 0.8
+    return max(1, int(round(actual_w * scale))), max(1, int(round(actual_h * scale)))
 
 
 user32 = ctypes.windll.user32
@@ -142,8 +197,12 @@ class WindowsDesktopController:
         self._last_masked_regions_capture: list[tuple[int, int, int, int]] = []
         self.actual_width = int(user32.GetSystemMetrics(0))
         self.actual_height = int(user32.GetSystemMetrics(1))
-        self.capture_width = max(1, int(round(self.actual_width * self.settings.scale)))
-        self.capture_height = max(1, int(round(self.actual_height * self.settings.scale)))
+        self.capture_width, self.capture_height = resolve_capture_resolution(
+            self.actual_width, self.actual_height, self.settings.target_resolution, self.settings.model_family_hint
+        )
+        # 可视化反馈层用：保存上一次 _perform() 期间记录的动作细节，
+        # 供 execute() 组装 ActionResult 时取用。每次 execute() 开始前会清空。
+        self._last_execution_details: dict[str, Any] = {}
 
     def capture_snapshot(self, label: str = "snapshot") -> Snapshot:
         image = ImageGrab.grab()
@@ -157,15 +216,17 @@ class WindowsDesktopController:
             masked_rect = self._mask_own_window(image)
             if masked_rect is not None:
                 self._last_masked_regions_actual = [masked_rect]
-        self.capture_width = max(1, int(round(actual_width * self.settings.scale)))
-        self.capture_height = max(1, int(round(actual_height * self.settings.scale)))
+        self.capture_width, self.capture_height = resolve_capture_resolution(
+            actual_width, actual_height, self.settings.target_resolution, self.settings.model_family_hint
+        )
         self._last_masked_regions_capture = []
         for rect in self._last_masked_regions_actual:
             capture_rect = self._capture_rect_from_actual(rect)
             if capture_rect is not None:
                 self._last_masked_regions_capture.append(capture_rect)
-        if self.settings.scale != 1.0:
-            image = image.resize((self.capture_width, self.capture_height))
+        target_w, target_h = self.capture_width, self.capture_height
+        if (actual_width, actual_height) != (target_w, target_h):
+            image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
         self._snapshot_index += 1
         path = self.session_root / f"{self._snapshot_index:03d}_{label}.jpg"
@@ -186,6 +247,8 @@ class WindowsDesktopController:
     def execute(self, arguments: dict[str, Any]) -> ActionResult:
         action = str(arguments.get("action") or "").strip().lower()
         modifiers = self._normalize_keys(arguments.get("modifiers"))
+        # 每次执行前清空上一次的可视化反馈细节，避免串值。
+        self._last_execution_details = {}
         self._press_down(modifiers)
         try:
             message = self._perform(action, arguments)
@@ -193,7 +256,13 @@ class WindowsDesktopController:
             self._release(modifiers)
         time.sleep(self._post_action_delay(action, arguments))
         snapshot = self.capture_snapshot(action or "action")
-        return ActionResult(message=message, snapshot=snapshot)
+        return ActionResult(
+            message=message,
+            snapshot=snapshot,
+            action_kind=self._last_execution_details.get("action_kind", ""),
+            physical_coord=self._last_execution_details.get("physical_coord"),
+            action_extra=self._last_execution_details.get("action_extra", {}),
+        )
 
     def is_action_targeting_masked_region(self, arguments: dict[str, Any]) -> bool:
         action = str(arguments.get("action") or "").strip().lower()
@@ -334,57 +403,115 @@ class WindowsDesktopController:
 
     def _perform(self, action: str, arguments: dict[str, Any]) -> str:
         if action == "screenshot":
+            # 不画波纹/不附带可视化反馈。
+            self._last_execution_details = {}
             return "已捕获最新截图。"
         if action == "mouse_move":
             x, y = self._require_coordinate(arguments.get("coordinate"))
             self._move(x, y)
+            self._last_execution_details = {
+                "action_kind": ACTION_MOVE_ONLY,
+                "physical_coord": self.to_real_coordinate(x, y),
+                "action_extra": {},
+            }
             return f"已将鼠标移动到截图坐标 ({x}, {y})。"
         if action == "left_click":
             x, y = self._require_coordinate(arguments.get("coordinate"))
             self._click(x, y, times=1, button="left")
+            self._last_execution_details = {
+                "action_kind": ACTION_LEFT_CLICK,
+                "physical_coord": self.to_real_coordinate(x, y),
+                "action_extra": {},
+            }
             return f"已在 ({x}, {y}) 左键单击。"
         if action == "double_click":
             x, y = self._require_coordinate(arguments.get("coordinate"))
             self._click(x, y, times=2, button="left")
+            self._last_execution_details = {
+                "action_kind": ACTION_DOUBLE_CLICK,
+                "physical_coord": self.to_real_coordinate(x, y),
+                "action_extra": {},
+            }
             return f"已在 ({x}, {y}) 左键双击。"
         if action == "right_click":
             x, y = self._require_coordinate(arguments.get("coordinate"))
             self._click(x, y, times=1, button="right")
+            self._last_execution_details = {
+                "action_kind": ACTION_RIGHT_CLICK,
+                "physical_coord": self.to_real_coordinate(x, y),
+                "action_extra": {},
+            }
             return f"已在 ({x}, {y}) 右键单击。"
         if action == "middle_click":
             x, y = self._require_coordinate(arguments.get("coordinate"))
             self._click(x, y, times=1, button="middle")
+            self._last_execution_details = {
+                "action_kind": ACTION_MIDDLE_CLICK,
+                "physical_coord": self.to_real_coordinate(x, y),
+                "action_extra": {},
+            }
             return f"已在 ({x}, {y}) 中键单击。"
         if action in {"left_click_drag", "drag"}:
             start_x, start_y = self._require_coordinate(arguments.get("start_coordinate"))
             end_x, end_y = self._require_coordinate(arguments.get("end_coordinate"))
             self._drag(start_x, start_y, end_x, end_y)
+            physical_start = self.to_real_coordinate(start_x, start_y)
+            physical_end = self.to_real_coordinate(end_x, end_y)
+            self._last_execution_details = {
+                "action_kind": ACTION_DRAG_END,
+                "physical_coord": physical_end,
+                "action_extra": {"start": physical_start, "end": physical_end},
+            }
             return f"已从 ({start_x}, {start_y}) 拖拽到 ({end_x}, {end_y})。"
         if action == "type":
             text = str(arguments.get("text") or "")
             if not text:
                 raise ValueError("type 操作需要提供 text。")
             self._paste_text(text)
+            self._last_execution_details = {
+                "action_kind": ACTION_TYPE_TEXT,
+                "physical_coord": None,
+                "action_extra": {"text": text},
+            }
             return f"已输入 {len(text)} 个字符。"
         if action == "key":
             keys = self._normalize_keys(arguments.get("keys"))
             if not keys:
                 raise ValueError("key 操作需要提供 keys。")
             self._hotkey(keys)
+            self._last_execution_details = {
+                "action_kind": ACTION_KEY_PRESS,
+                "physical_coord": None,
+                "action_extra": {"keys": list(keys)},
+            }
             return f"已按下按键：{keys}。"
         if action == "scroll":
             amount = int(arguments.get("scroll_amount") or 0)
             x, y = self._optional_coordinate(arguments.get("coordinate"))
             self._scroll(amount, x, y)
+            physical_coord: tuple[int, int] | None = None
+            if x is not None and y is not None:
+                physical_coord = self.to_real_coordinate(int(x), int(y))
+            # amount > 0 视为向上滚动，amount < 0 视为向下滚动；amount == 0 默认归为向下。
+            scroll_kind = ACTION_SCROLL_UP if amount > 0 else ACTION_SCROLL_DOWN
+            self._last_execution_details = {
+                "action_kind": scroll_kind,
+                "physical_coord": physical_coord,
+                "action_extra": {"amount": amount},
+            }
             return f"已滚动 {amount} 格。"
         if action == "wait":
             seconds = self._seconds(arguments)
             time.sleep(seconds)
+            # wait 不画波纹。
+            self._last_execution_details = {}
             return f"已等待 {seconds:.2f} 秒。"
         if action == "activate_window":
             window_title = str(arguments.get("window_title") or arguments.get("title") or "").strip()
             if not window_title:
                 raise ValueError("activate_window 操作需要提供 window_title。")
+            # activate_window 不画波纹。
+            self._last_execution_details = {}
             return self.activate_window_by_title(window_title)
         raise ValueError(f"不支持的 computer 操作：{action}")
 
@@ -431,12 +558,99 @@ class WindowsDesktopController:
         if score is None:
             return "截图变化：无法比较。"
         if score < 1.0:
-            return "截图变化：几乎没有变化，上一动作可能没有产生可见效果。"
+            return (
+                "⚠️ 截图变化：几乎没有变化。"
+                "上一动作很可能没有命中目标 (点错位置 / 元素不可点击 / 焦点丢失 / 操作被屏蔽)。"
+                "**请重新观察当前截图,核对目标元素的实际位置,不要假设上一动作已经成功**。"
+                "若确认元素已正确点击但 UI 加载慢,可调用 wait()。"
+            )
         if score < 4.0:
-            return "截图变化：变化很小，请仔细确认上一动作是否真正生效。"
+            return (
+                "⚠️ 截图变化：非常微弱。请仔细比对前后截图,确认上一动作是否真正命中目标元素。"
+                "如果目标元素仍然存在且未被激活,**很可能是点错位置,需要重新定位**。"
+            )
         if score < 12.0:
             return "截图变化：有轻微变化。"
         return "截图变化：明显变化。"
+
+    def make_region_focus_snapshot(
+        self,
+        snapshot: Snapshot,
+        click_xy: tuple[int, int],
+        *,
+        region_size: int = 192,
+        inset_size: int = 320,
+    ) -> Snapshot:
+        """围绕一次失败点击 (cx, cy) 生成 RegionFocus 复合截图。
+
+        在原 snapshot 上画红框标出点击区域,并把该区域放大后拼到右下角,
+        让模型既看到全局又看清局部。返回一个全新的 Snapshot,
+        保留原 width/height/actual_*/title 元信息。
+
+        借鉴 UI-TARS RegionFocus / VLAA-GUI Loop-Breaker 思路:点错位置时
+        给模型一个"我应该看哪里"的提示,而不是让它对着同一张全局截图反复猜。
+        """
+        try:
+            image = Image.open(snapshot.path).convert("RGB")
+        except Exception:
+            return snapshot
+        canvas_w, canvas_h = image.size
+        cx, cy = click_xy
+        cx = max(0, min(canvas_w - 1, int(cx)))
+        cy = max(0, min(canvas_h - 1, int(cy)))
+        half = max(48, region_size // 2)
+        left = max(0, cx - half)
+        top = max(0, cy - half)
+        right = min(canvas_w, cx + half)
+        bottom = min(canvas_h, cy + half)
+        if right <= left or bottom <= top:
+            return snapshot
+        crop = image.crop((left, top, right, bottom))
+        target = max(160, inset_size)
+        crop = crop.resize((target, target), Image.Resampling.LANCZOS)
+        annotated = image.copy()
+        draw = ImageDraw.Draw(annotated)
+        # 1) 在原坐标处画红色十字 + 矩形,清晰标出"点击位置"和"参考观察范围"。
+        draw.rectangle((left, top, right - 1, bottom - 1), outline=(220, 40, 40), width=3)
+        cross_arm = 14
+        draw.line((cx - cross_arm, cy, cx + cross_arm, cy), fill=(255, 200, 0), width=3)
+        draw.line((cx, cy - cross_arm, cx, cy + cross_arm), fill=(255, 200, 0), width=3)
+        # 2) 把放大的局部贴到右下角,留 12px 边距,带红色边框 + 标题条。
+        inset_x = max(0, canvas_w - target - 12)
+        inset_y = max(0, canvas_h - target - 12)
+        annotated.paste(crop, (inset_x, inset_y))
+        draw.rectangle(
+            (inset_x - 2, inset_y - 2, inset_x + target + 1, inset_y + target + 1),
+            outline=(220, 40, 40),
+            width=3,
+        )
+        # 标题条 (黑底 + 黄色文字)
+        label = f"RegionFocus  ({cx},{cy})  +-{half}px"
+        bar_h = 18
+        bar_top = max(0, inset_y - bar_h - 2)
+        draw.rectangle(
+            (inset_x - 2, bar_top, inset_x + target + 1, bar_top + bar_h),
+            fill=(0, 0, 0),
+        )
+        try:
+            draw.text((inset_x + 4, bar_top + 2), label, fill=(255, 220, 60))
+        except Exception:
+            pass
+        self._snapshot_index += 1
+        path = self.session_root / f"{self._snapshot_index:03d}_region_focus.jpg"
+        buffer = io.BytesIO()
+        annotated.save(path, format="JPEG", quality=self.settings.jpeg_quality, optimize=True)
+        annotated.save(buffer, format="JPEG", quality=self.settings.jpeg_quality, optimize=True)
+        return Snapshot(
+            path=path,
+            data_url=f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}",
+            width=canvas_w,
+            height=canvas_h,
+            actual_width=snapshot.actual_width,
+            actual_height=snapshot.actual_height,
+            foreground_window_title=snapshot.foreground_window_title,
+            visible_window_titles=list(snapshot.visible_window_titles),
+        )
 
     def _mask_own_window(self, image) -> tuple[int, int, int, int] | None:
         title = (self.settings.own_window_title or "").strip()
@@ -526,6 +740,13 @@ class WindowsDesktopController:
             self.translate_coordinate(x, capture_size=self.capture_width, actual_size=self.actual_width),
             self.translate_coordinate(y, capture_size=self.capture_height, actual_size=self.actual_height),
         )
+
+    def screenshot_to_physical(self, x: int, y: int) -> tuple[int, int]:
+        """把截图坐标转回物理屏幕坐标，供 visual overlay 直接画波纹。
+
+        这是 to_real_coordinate 的公开别名，按设计文档 3.2 节命名。
+        """
+        return self.to_real_coordinate(x, y)
 
     @staticmethod
     def get_foreground_window_title() -> str:

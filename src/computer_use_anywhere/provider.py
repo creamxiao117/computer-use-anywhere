@@ -5,12 +5,14 @@ import re
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 from .models import (
     AssistantReply,
     PROVIDER_ANTHROPIC_OFFICIAL,
     PROVIDER_OFFICIAL_COMPATIBLE,
     PROVIDER_OPENAI_COMPATIBLE,
+    PROVIDER_SEMI_OFFICIAL,
     ProviderConfig,
     Snapshot,
     ToolCall,
@@ -22,10 +24,37 @@ ANTHROPIC_BETA_2024_10_22 = "computer-use-2024-10-22"
 ANTHROPIC_BETA_2025_01_24 = "computer-use-2025-01-24"
 ANTHROPIC_BETA_2025_11_24 = "computer-use-2025-11-24"
 INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14"
+COMPACT_2026_01_12_BETA = "compact-2026-01-12"
 
 ANTHROPIC_TOOL_2024_10_22 = "computer_20241022"
 ANTHROPIC_TOOL_2025_01_24 = "computer_20250124"
 ANTHROPIC_TOOL_2025_11_24 = "computer_20251124"
+
+
+DEFAULT_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/136.0.0.0 Safari/537.36"
+)
+
+
+def default_browser_headers(base_url: str) -> dict[str, str]:
+    """Chrome-flavored default headers to dodge Cloudflare 1010 on relay sites.
+
+    Skipped for api.anthropic.com itself (the official endpoint does not
+    require browser-like headers and adding them is just noise).
+    """
+    parsed = urlparse((base_url or "").strip())
+    if not parsed.scheme or not parsed.netloc:
+        return {}
+    if "api.anthropic.com" in parsed.netloc:
+        return {}
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    return {
+        "User-Agent": DEFAULT_BROWSER_UA,
+        "Origin": origin,
+        "Referer": origin + "/",
+    }
 
 
 class ProviderError(RuntimeError):
@@ -48,12 +77,16 @@ def guess_anthropic_computer_contract(model: str) -> tuple[str, str]:
 def create_provider(config: ProviderConfig):
     if config.provider_kind == PROVIDER_ANTHROPIC_OFFICIAL:
         return AnthropicOfficialProvider(config)
+    if config.provider_kind == PROVIDER_SEMI_OFFICIAL:
+        return SemiOfficialProvider(config)
     return OpenAICompatibleProvider(config)
 
 
 def provider_diagnostics(config: ProviderConfig) -> list[str]:
     if config.provider_kind == PROVIDER_ANTHROPIC_OFFICIAL:
         return anthropic_official_diagnostics(config)
+    if config.provider_kind == PROVIDER_SEMI_OFFICIAL:
+        return semi_official_diagnostics(config)
     return openai_compatible_diagnostics(config)
 
 
@@ -122,6 +155,29 @@ def openai_compatible_diagnostics(config: ProviderConfig) -> list[str]:
     if config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE and ("api.anthropic.com" in lowered or "/messages" in lowered):
         diagnostics.append("官方体验兼容模式仍走 /chat/completions；如果你使用原生 Anthropic /messages，请切到真官方模式。")
 
+    return diagnostics
+
+
+def semi_official_diagnostics(config: ProviderConfig) -> list[str]:
+    diagnostics: list[str] = []
+    cleaned = (config.base_url or "").strip().rstrip("/")
+    lowered = cleaned.lower()
+    if "/chat/completions" in lowered:
+        diagnostics.append(
+            "半官方模式走 /messages 协议；当前接口地址包含 /chat/completions，中转站可能不支持该路径。"
+            "请检查中转站使用说明，确认它是否支持 /v1/messages。"
+        )
+    if not config.anthropic_version.strip():
+        diagnostics.append("未填写 anthropic-version，部分中转站可能因为缺少版本号拒绝请求。")
+    if not config.anthropic_beta.strip() and not config.extra_headers:
+        diagnostics.append(
+            "未填写 anthropic-beta 也无额外请求头。中转站如果支持透明转发 beta 头，"
+            "界面会自动注入 computer-use-2025-11-24 + thinking/compact 等 beta。"
+        )
+    if config.enable_compact and not config.anthropic_beta.strip():
+        diagnostics.append(
+            "已启用 compact-2026-01-12：beta 头虽然未手动填写，但会跟随 thinking/computer-use beta 一同自动发送。"
+        )
     return diagnostics
 
 
@@ -422,6 +478,8 @@ class OpenAICompatibleProvider:
         if "openrouter.ai" in self.config.base_url:
             headers.setdefault("HTTP-Referer", "https://local.windows.computer.use")
             headers.setdefault("X-Title", "Claude Computer Use Proxy")
+        for key, value in default_browser_headers(self.config.base_url).items():
+            headers.setdefault(key, value)
         headers.update(self.config.extra_headers)
         return headers
 
@@ -608,13 +666,24 @@ class AnthropicOfficialProvider:
         if system_prompt:
             payload["system"] = system_prompt
         if self.config.enable_thinking:
+            budget = self._resolve_thinking_budget()
             payload["thinking"] = {
                 "type": "enabled",
-                "budget_tokens": max(1024, int(self.config.thinking_budget)),
+                "budget_tokens": budget,
             }
         payload.update(self.config.extra_body)
         body = OpenAICompatibleProvider._post_json(self._messages_url(self.config.base_url), payload, self._headers())
         return self._parse_response_body(body)
+
+    def _resolve_thinking_budget(self) -> int:
+        intensity = (self.config.thinking_intensity or "medium").lower()
+        max_tokens = self.config.max_tokens
+        if intensity == "high":
+            return max(1024, int(max_tokens * 0.8))
+        if intensity == "medium":
+            return max(1024, int(max_tokens * 0.5))
+        # Custom budget mode
+        return max(1024, int(self.config.thinking_budget))
 
     @staticmethod
     def _messages_url(base_url: str) -> str:
@@ -631,12 +700,16 @@ class AnthropicOfficialProvider:
         beta_values = [value.strip() for value in self.beta_header.split(",") if value.strip()]
         if self.config.enable_thinking and INTERLEAVED_THINKING_BETA not in beta_values:
             beta_values.append(INTERLEAVED_THINKING_BETA)
+        if self.config.enable_compact and COMPACT_2026_01_12_BETA not in beta_values:
+            beta_values.append(COMPACT_2026_01_12_BETA)
         headers = {
             "Content-Type": "application/json",
             "x-api-key": self.config.api_key,
             "anthropic-version": self.version,
             "anthropic-beta": ",".join(beta_values),
         }
+        for key, value in default_browser_headers(self.config.base_url).items():
+            headers.setdefault(key, value)
         headers.update(self.config.extra_headers)
         return headers
 
@@ -685,4 +758,85 @@ class AnthropicOfficialProvider:
             raw=body,
             assistant_message={"role": "assistant", "content": content},
             reasoning_summary="\n".join(reasoning_parts),
+        )
+
+
+class SemiOfficialProvider(AnthropicOfficialProvider):
+    """Fourth mode: Messages API request body + Bearer auth + optional beta headers.
+
+    Designed for relay/proxy stations that expose a /messages endpoint and
+    transparently forward to Anthropic API, but use Bearer token auth instead
+    of x-api-key.
+
+    Key differences from AnthropicOfficialProvider:
+    - Authorization: Bearer <key>  (not x-api-key)
+    - anthropic-version: optional, controlled by user's manual config
+    - anthropic-beta: optional, no automatic injection
+    - Response parsing: tries Anthropic format first, falls back to OpenAI
+    """
+
+    kind = PROVIDER_SEMI_OFFICIAL
+
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.config.api_key}",
+        }
+        version = self.config.anthropic_version.strip()
+        if version:
+            headers["anthropic-version"] = version
+        beta = self.config.anthropic_beta.strip()
+        if beta:
+            beta_values = [b.strip() for b in beta.split(",") if b.strip()]
+        else:
+            beta_values = []
+        if self.config.enable_thinking and INTERLEAVED_THINKING_BETA not in beta_values:
+            beta_values.append(INTERLEAVED_THINKING_BETA)
+        if self.config.enable_compact and COMPACT_2026_01_12_BETA not in beta_values:
+            beta_values.append(COMPACT_2026_01_12_BETA)
+        if beta_values:
+            headers["anthropic-beta"] = ",".join(beta_values)
+        for key, value in default_browser_headers(self.config.base_url).items():
+            headers.setdefault(key, value)
+        headers.update(self.config.extra_headers)
+        return headers
+
+    def _parse_response_body(self, body: dict[str, Any]) -> AssistantReply:
+        """Try Anthropic format first, fall back to OpenAI-compatible."""
+        content = body.get("content")
+        if isinstance(content, list):
+            return AnthropicOfficialProvider._parse_response_body(self, body)
+        # Fallback: the relay wraps results in OpenAI-style 'choices'
+        return self._parse_openai_style_body(body)
+
+    @staticmethod
+    def _parse_openai_style_body(body: dict[str, Any]) -> AssistantReply:
+        if "error" in body:
+            raise ProviderError(OpenAICompatibleProvider._extract_error(body["error"]))
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ProviderError(f"Malformed response, missing choices: {body}")
+        first = choices[0]
+        message = first.get("message") or {}
+        text = OpenAICompatibleProvider._stringify_content(message.get("content"))
+        tool_calls = OpenAICompatibleProvider._parse_tool_calls(message.get("tool_calls"))
+        assistant_message: dict[str, Any] = {"role": "assistant", "content": text}
+        if tool_calls:
+            assistant_message["tool_calls"] = [
+                {
+                    "id": call.call_id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                    },
+                }
+                for call in tool_calls
+            ]
+        return AssistantReply(
+            text=text,
+            tool_calls=tool_calls,
+            finish_reason=first.get("finish_reason"),
+            raw=body,
+            assistant_message=assistant_message,
         )

@@ -14,7 +14,7 @@ $Entry = Join-Path $ProjectRoot "run.py"
 $DistDir = Join-Path $ProjectRoot "dist"
 $BuildDir = Join-Path $ProjectRoot "build"
 $SpecDir = Join-Path $ProjectRoot "build"
-$Name = "ClaudeComputerUseProxy"
+$Name = "ComputerUseAnywhere"
 
 if (-not (Test-Path $Entry)) {
     throw "未找到入口文件：$Entry"
@@ -49,7 +49,6 @@ try {
         "--clean",
         "--name", $Name,
         "--paths", (Join-Path $ProjectRoot "src"),
-        "--exclude-module", "numpy",
         "--exclude-module", "matplotlib",
         "--exclude-module", "scipy",
         "--exclude-module", "pandas",

@@ -10,15 +10,15 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from claude_computer_use_proxy.agent import (
+from computer_use_anywhere.agent import (
     ComputerUseAgent,
     build_system_prompt,
     normalize_computer_action,
     should_apply_browser_dom_first_guard,
     task_prefers_browser_dom,
 )
-from claude_computer_use_proxy.models import ProviderConfig, SessionConfig, Snapshot
-from claude_computer_use_proxy.provider import OpenAICompatibleProvider
+from computer_use_anywhere.models import ProviderConfig, SessionConfig, Snapshot
+from computer_use_anywhere.provider import OpenAICompatibleProvider
 
 
 class AgentTests(unittest.TestCase):

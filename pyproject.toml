@@ -3,13 +3,14 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-computer-use-proxy"
-version = "0.1.0"
-description = "Proxy-ready, Windows-native Claude-style computer use without Docker."
+name = "computer-use-anywhere"
+version = "0.3.2"
+description = "Windows-native computer use framework — proxy-first, no Docker. Works with Claude, GPT, Gemini via relay stations."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "Pillow>=10.0.0",
+    "numpy>=1.24",
 ]
 
 [tool.setuptools]

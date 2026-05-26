@@ -10,8 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from claude_computer_use_proxy.models import PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE, ProviderConfig
-from claude_computer_use_proxy.provider import (
+from computer_use_anywhere.models import PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE, ProviderConfig
+from computer_use_anywhere.provider import (
     ANTHROPIC_BETA_2025_01_24,
     ANTHROPIC_BETA_2025_11_24,
     ANTHROPIC_TOOL_2025_01_24,

@@ -12,8 +12,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from claude_computer_use_proxy.models import Snapshot
-from claude_computer_use_proxy.replay import (
+from computer_use_anywhere.models import Snapshot
+from computer_use_anywhere.replay import (
     ActionVerification,
     SessionReplay,
     verify_action_result,
@@ -41,7 +41,7 @@ class ReplayTests(unittest.TestCase):
             result_message="已激活窗口",
             before_snapshot=fake_snapshot("before.jpg", foreground="代理"),
             after_snapshot=fake_snapshot("after.jpg", foreground="Bilibili - Edge"),
-            own_window_title="Claude 电脑操作代理",
+            own_window_title="Computer Use Anywhere",
         )
         self.assertEqual(verification.status, "ok")
 
@@ -51,8 +51,8 @@ class ReplayTests(unittest.TestCase):
             arguments={"action": "type", "text": "abc"},
             result_message="已输入 3 个字符。",
             before_snapshot=fake_snapshot("before.jpg", foreground="Edge"),
-            after_snapshot=fake_snapshot("after.jpg", foreground="Claude 电脑操作代理"),
-            own_window_title="Claude 电脑操作代理",
+            after_snapshot=fake_snapshot("after.jpg", foreground="Computer Use Anywhere"),
+            own_window_title="Computer Use Anywhere",
         )
         self.assertEqual(verification.status, "warn")
         self.assertIn("代理窗口", verification.message)

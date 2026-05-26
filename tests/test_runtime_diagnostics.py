@@ -10,8 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from claude_computer_use_proxy.models import SessionConfig
-from claude_computer_use_proxy.runtime_diagnostics import (
+from computer_use_anywhere.models import SessionConfig
+from computer_use_anywhere.runtime_diagnostics import (
     RuntimeDiagnostic,
     format_runtime_diagnostic,
     run_local_preflight,

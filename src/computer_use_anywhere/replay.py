@@ -155,6 +155,15 @@ def verify_action_result(
     if action in {"screenshot", "wait"}:
         return ActionVerification("info", "观察类动作不要求画面变化。")
 
+    # 提取 click 类动作的坐标 (供"无变化"提示使用)
+    click_xy: tuple[int, int] | None = None
+    coord_raw = arguments.get("coordinate")
+    if isinstance(coord_raw, (list, tuple)) and len(coord_raw) == 2:
+        try:
+            click_xy = (int(coord_raw[0]), int(coord_raw[1]))
+        except (TypeError, ValueError):
+            click_xy = None
+
     if after_snapshot is not None:
         foreground = after_snapshot.foreground_window_title or ""
         if _title_contains(foreground, own_window_title) and action in {"type", "key"}:
@@ -168,7 +177,30 @@ def verify_action_result(
                 return ActionVerification("ok", f"前台窗口已匹配“{query}”。")
             return ActionVerification("warn", f"激活窗口后前台是“{foreground or '未知'}”，未确认匹配目标窗口。")
 
-    if "几乎没有变化" in result or "变化很小" in result:
+    # 微验证: 按动作类型给出差异化的 "几乎无变化" 反馈
+    has_no_change = "几乎没有变化" in result or "变化很小" in result
+    if has_no_change:
+        if action in {"left_click", "click", "double_click", "right_click", "middle_click"} and click_xy:
+            return ActionVerification(
+                "warn",
+                f"⚠️ 点击 ({click_xy[0]}, {click_xy[1]}) 后画面几乎无变化。"
+                f"**这强烈提示点错了位置或目标不可点击**。请重新观察当前截图，"
+                f"特别注意 ({click_xy[0]}, {click_xy[1]}) 附近 ±40px 范围内是否真有可点击元素 "
+                f"(按钮 / 链接 / 图标)。若该位置没有目标元素，请重新定位到正确像素；"
+                f"若有但 UI 反应慢，可调用 wait()。"
+            )
+        if action in {"type", "key"}:
+            return ActionVerification(
+                "warn",
+                "⚠️ 输入/按键后画面几乎无变化。**可能输入到了错误焦点窗口或操作未生效**。"
+                "请通过截图确认目标输入框是否真的接收了文本；如果没有，先用 left_click 显式聚焦目标输入框再重输。",
+            )
+        if action == "scroll":
+            return ActionVerification(
+                "warn",
+                "⚠️ 滚动后画面几乎无变化。可能已到顶/到底，或滚动条不在该坐标。"
+                "如目标内容未出现，尝试改变 scroll 位置或方向。",
+            )
         return ActionVerification("warn", "截图变化很小，这一步可能没有产生可见效果。")
     if before_snapshot and after_snapshot and before_snapshot.path == after_snapshot.path:
         return ActionVerification("warn", "执行前后截图文件相同，无法确认动作效果。")

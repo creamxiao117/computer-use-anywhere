@@ -9,6 +9,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,19 +23,26 @@ from PIL import Image, ImageTk
 from .agent import AGENT_WINDOW_TITLE, ComputerUseAgent
 from .models import (
     AgentEvent,
+    AGENT_STATE_ADVISOR_IDLE,
+    AGENT_STATE_ADVISOR_RUNNING,
+    AGENT_STATE_MAIN_IDLE,
+    AGENT_STATE_MAIN_RUNNING,
     PROVIDER_ANTHROPIC_OFFICIAL,
     PROVIDER_OFFICIAL_COMPATIBLE,
     PROVIDER_OPENAI_COMPATIBLE,
+    PROVIDER_SEMI_OFFICIAL,
     ProviderConfig,
     SessionConfig,
 )
 from .provider import (
     ANTHROPIC_VERSION_DEFAULT,
     AnthropicOfficialProvider,
+    default_browser_headers,
     guess_anthropic_computer_contract,
     provider_diagnostics,
 )
 from .runtime_diagnostics import format_runtime_diagnostic, run_local_preflight
+from .visual_overlay import BreathingOverlay, FloatingHUD, check_windows_build
 
 
 def _app_root() -> Path:
@@ -86,6 +95,26 @@ class App:
         self.mode_widgets: dict[str, dict[str, tk.Widget]] = {}
 
         self.settings = self._load_settings()
+        # New v3 variables
+        self.max_tokens_var = tk.StringVar(value="4096")
+        self.target_resolution_var = tk.StringVar(value="1280x720")
+        self.model_family_hint_var = tk.StringVar(value="auto")
+        self.thinking_intensity_var = tk.StringVar(value="medium")
+        self.enable_compact_var = tk.BooleanVar(value=False)
+        self.advisor_enabled_var = tk.BooleanVar(value=False)
+        self.advisor_source_var = tk.StringVar(value="inherit_main")
+        self.advisor_model_var = tk.StringVar()
+        self.advisor_api_key_var = tk.StringVar()
+        self.advisor_base_url_var = tk.StringVar()
+        self.advisor_model_entry: tk.Entry | None = None
+        self.refresh_advisor_models_button: tk.Button | None = None
+        self.advisor_body: tk.Frame | None = None
+        # Visual feedback layer (v3.2)
+        self.visual_feedback_enabled_var = tk.BooleanVar(value=True)
+        self.color_scheme_var = tk.StringVar(value="default")
+        self._overlay: BreathingOverlay | None = None
+        self._hud: FloatingHUD | None = None
+        self._last_agent_state: str = AGENT_STATE_MAIN_IDLE
         self._build_style()
         self._build_ui()
         self._apply_settings()
@@ -134,17 +163,22 @@ class App:
     def _build_ui(self) -> None:
         shell = tk.Frame(self.root, bg=BG)
         shell.pack(fill="both", expand=True, padx=18, pady=18)
-        shell.grid_columnconfigure(0, weight=0)
-        shell.grid_columnconfigure(1, weight=1)
-        shell.grid_rowconfigure(1, weight=1)
-
         self._build_topbar(shell)
-        self._build_sidebar(shell)
-        self._build_main(shell)
+        body_paned = tk.PanedWindow(
+            shell,
+            orient="horizontal",
+            sashwidth=6,
+            sashrelief="flat",
+            bg=BORDER,
+            bd=0,
+        )
+        body_paned.pack(fill="both", expand=True)
+        self._build_sidebar(body_paned)
+        self._build_main(body_paned)
 
     def _build_topbar(self, parent: tk.Widget) -> None:
         topbar = tk.Frame(parent, bg=BG)
-        topbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 14))
+        topbar.pack(side="top", fill="x", pady=(0, 14))
         topbar.grid_columnconfigure(0, weight=1)
 
         left = tk.Frame(topbar, bg=BG)
@@ -187,9 +221,8 @@ class App:
         self.session_hint.pack(anchor="e", pady=(6, 0))
 
     def _build_sidebar(self, parent: tk.Widget) -> None:
-        sidebar = tk.Frame(parent, bg=BG, width=460)
-        sidebar.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
-        sidebar.grid_propagate(False)
+        sidebar = tk.Frame(parent, bg=BG)
+        parent.add(sidebar, minsize=380, width=460, stretch="never")
         sidebar.grid_rowconfigure(0, weight=1)
         sidebar.grid_rowconfigure(1, weight=0)
         sidebar.grid_columnconfigure(0, weight=1)
@@ -259,9 +292,22 @@ class App:
         self.api_key_var = tk.StringVar()
         self.model_var = tk.StringVar()
         self.model_var.trace_add("write", lambda *_args: self._refresh_contract_hint())
-        self._add_entry(connection_card, "接口地址", self.base_url_var)
+        self._add_entry(
+            connection_card,
+            "接口地址",
+            self.base_url_var,
+            helper="末尾 / 可加可不加;/v1、/chat/completions、/messages、/models 都会自动适配。",
+        )
         self._add_entry(connection_card, "API Key", self.api_key_var, show="*")
-        self._add_entry(connection_card, "模型", self.model_var)
+        self.model_entry, self.refresh_models_button = self._add_entry_with_button(
+            connection_card,
+            "模型",
+            self.model_var,
+            button_text="⟳",
+            button_command=self.on_fetch_models,
+            button_tooltip="拉取模型列表",
+        )
+        self._add_entry(connection_card, "max_tokens", self.max_tokens_var, width=18)
 
         self.official_card = self._card(self.sidebar_content)
         self._card_title(self.official_card, "Anthropic 官方协议")
@@ -286,7 +332,15 @@ class App:
             variable=self.enable_thinking_var,
             style="Soft.TCheckbutton",
         ).pack(anchor="w", pady=(4, 4))
+        tk.Label(self.official_card, text="思考强度", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        ttk.Combobox(self.official_card, textvariable=self.thinking_intensity_var, values=["medium", "high"], state="readonly", width=18).pack(anchor="w", pady=(0, 10))
         self._add_entry(self.official_card, "thinking token 预算", self.thinking_budget_var, width=18)
+        ttk.Checkbutton(
+            self.official_card,
+            text="启用 compact-2026-01-12 长对话压缩",
+            variable=self.enable_compact_var,
+            style="Soft.TCheckbutton",
+        ).pack(anchor="w", pady=(4, 4))
         tk.Label(
             self.official_card,
             textvariable=self.contract_hint_var,
@@ -309,11 +363,26 @@ class App:
         self.browser_dom_first_var = tk.BooleanVar(value=True)
         self.browser_debug_host_var = tk.StringVar()
         self.browser_debug_port_var = tk.StringVar()
-        self._add_entry(runtime_card, "截图缩放", self.scale_var, width=18)
+        tk.Label(runtime_card, text="目标分辨率", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        resolution_combo = ttk.Combobox(runtime_card, textvariable=self.target_resolution_var, values=["1280x720", "1920x1080", "max_api_fit", "scale"], state="readonly", width=18)
+        resolution_combo.pack(anchor="w", pady=(0, 10))
+        tk.Label(runtime_card, text="模型家族（影响 API 像素限制）", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        family_combo = ttk.Combobox(runtime_card, textvariable=self.model_family_hint_var, values=["auto", "claude_4_6", "opus_4_7"], state="readonly", width=18)
+        family_combo.pack(anchor="w", pady=(0, 10))
+        self._add_entry(runtime_card, "截图缩放(仅scale模式)", self.scale_var, width=18)
         self._add_entry(runtime_card, "JPEG 质量", self.jpeg_quality_var, width=18)
         self._add_entry(runtime_card, "最大步数", self.max_steps_var, width=18)
         ttk.Checkbutton(runtime_card, text="逐步确认每次操作", variable=self.confirm_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(4, 2))
         ttk.Checkbutton(runtime_card, text="运行时自动隐藏本窗口（推荐）", variable=self.hide_window_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 2))
+        ttk.Checkbutton(runtime_card, text="启用可视化反馈（呼吸灯 + 点击波纹 + 悬浮 HUD，仅隐藏主窗口时启用）", variable=self.visual_feedback_enabled_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 4))
+        tk.Label(runtime_card, text="可视化色彩主题", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        ttk.Combobox(
+            runtime_card,
+            textvariable=self.color_scheme_var,
+            values=["default", "cyber", "subtle", "monochrome"],
+            state="readonly",
+            width=18,
+        ).pack(anchor="w", pady=(0, 10))
         ttk.Checkbutton(runtime_card, text="启用浏览器 DOM 工具（兼容模式）", variable=self.browser_dom_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 2))
         ttk.Checkbutton(runtime_card, text="网页任务优先使用 DOM（推荐）", variable=self.browser_dom_first_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 2))
         self._add_entry(runtime_card, "浏览器调试地址", self.browser_debug_host_var, width=18)
@@ -325,6 +394,28 @@ class App:
         tk.Label(
             runtime_card,
             text="浏览器 DOM 需要 Edge/Chrome 用 --remote-debugging-port=9222 启动；不可用时会自动回退到截图操作。",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 9),
+            wraplength=390,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        advisor_card = self._card(self.sidebar_content)
+        advisor_card.pack(fill="x", pady=(0, 12))
+        self._card_title(advisor_card, "双模型顾问（第三版）")
+        ttk.Checkbutton(
+            advisor_card,
+            text="启用顾问模型（失败时自动切换到更强模型）",
+            variable=self.advisor_enabled_var,
+            style="Soft.TCheckbutton",
+            command=self._refresh_advisor_card,
+        ).pack(anchor="w", pady=(4, 2))
+        self.advisor_body = tk.Frame(advisor_card, bg=PANEL)
+        self.advisor_body.pack(fill="x", pady=(6, 4))
+        tk.Label(
+            advisor_card,
+            text="触发条件：越界 / 前台不安全 / 执行错误 / 动作无效。",
             bg=PANEL,
             fg=MUTED,
             font=("Microsoft YaHei UI", 9),
@@ -355,7 +446,7 @@ class App:
 
     def _build_main(self, parent: tk.Widget) -> None:
         main_shell = tk.Frame(parent, bg=BG)
-        main_shell.grid(row=1, column=1, sticky="nsew")
+        parent.add(main_shell, minsize=600, stretch="always")
         main_shell.grid_rowconfigure(0, weight=1)
         main_shell.grid_columnconfigure(0, weight=1)
 
@@ -484,31 +575,31 @@ class App:
         self._configure_reasoning_tags()
 
     def _build_mode_switch(self, parent: tk.Widget) -> None:
-        row = tk.Frame(parent, bg=PANEL_ALT)
-        row.pack(fill="x")
-        row.grid_columnconfigure(0, weight=1)
-        row.grid_columnconfigure(1, weight=1)
-        row.grid_columnconfigure(2, weight=1)
+        outer = tk.Frame(parent, bg=PANEL_ALT)
+        outer.pack(fill="x")
+        row1 = tk.Frame(outer, bg=PANEL_ALT)
+        row1.pack(fill="x", pady=(0, 6))
+        row1.grid_columnconfigure(0, weight=1)
+        row1.grid_columnconfigure(1, weight=1)
         self._create_mode_option(
-            row,
-            0,
-            PROVIDER_OPENAI_COMPATIBLE,
-            "兼容模式",
-            "适合中转站",
+            row1, 0,
+            PROVIDER_OPENAI_COMPATIBLE, "兼容模式", "适合中转站",
         )
         self._create_mode_option(
-            row,
-            1,
-            PROVIDER_OFFICIAL_COMPATIBLE,
-            "官方体验",
-            "中转站可用",
+            row1, 1,
+            PROVIDER_OFFICIAL_COMPATIBLE, "官方体验", "中转站可用",
+        )
+        row2 = tk.Frame(outer, bg=PANEL_ALT)
+        row2.pack(fill="x")
+        row2.grid_columnconfigure(0, weight=1)
+        row2.grid_columnconfigure(1, weight=1)
+        self._create_mode_option(
+            row2, 0,
+            PROVIDER_SEMI_OFFICIAL, "半官方模式 v3", "中转站+Claude协议",
         )
         self._create_mode_option(
-            row,
-            2,
-            PROVIDER_ANTHROPIC_OFFICIAL,
-            "官方模式",
-            "Anthropic 协议",
+            row2, 1,
+            PROVIDER_ANTHROPIC_OFFICIAL, "官方模式", "Anthropic 直连",
         )
 
     def _create_mode_option(self, parent: tk.Widget, column: int, kind: str, title: str, subtitle: str) -> None:
@@ -536,42 +627,146 @@ class App:
         selected = self.provider_kind_var.get()
         for kind, widgets in self.mode_widgets.items():
             active = kind == selected
-            official_tone = kind in {PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE}
+            official_tone = kind in {PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE, PROVIDER_SEMI_OFFICIAL}
+            semi_official = kind == PROVIDER_SEMI_OFFICIAL
             card_bg = OFFICIAL_SOFT if active and official_tone else (ACCENT_SOFT if active else PANEL)
-            card_fg = OFFICIAL if active and official_tone else (ACCENT_ACTIVE if active else TEXT)
+            card_fg = "#6A4BC4" if active and semi_official else (OFFICIAL if active and official_tone else (ACCENT_ACTIVE if active else TEXT))
             card = widgets["card"]
             circle = widgets["circle"]
             label = widgets["label"]
             hint = widgets["hint"]
-            card.configure(bg=card_bg, highlightbackground=(OFFICIAL if active and official_tone else (ACCENT if active else BORDER)))
+            card_border = ("#6A4BC4" if active and semi_official else OFFICIAL if active and official_tone else ACCENT if active else BORDER)
+            card.configure(bg=card_bg, highlightbackground=card_border)
             label.configure(bg=card_bg, fg=card_fg)
             hint.configure(bg=card_bg, fg=MUTED)
             circle.configure(bg=card_bg)
             circle.delete("all")
-            outline = OFFICIAL if official_tone else ACCENT
+            outline = "#6A4BC4" if semi_official else (OFFICIAL if official_tone else ACCENT)
             circle.create_oval(2, 2, 16, 16, outline=outline, width=2, fill=outline if active else card_bg)
 
         if selected == PROVIDER_ANTHROPIC_OFFICIAL:
             self.hero_title_var.set("Anthropic 官方 computer use")
-            self.hero_body_var.set("这套模式直接走 Anthropic Messages API、官方 beta 头和官方 computer 工具协议；可切换纯原生或增强原生。")
-            self.subtitle_var.set("三模式：当前为 Anthropic 官方模式")
+            self.hero_body_var.set("直接走 Anthropic Messages API、官方 beta 头和 computer 工具；可切换纯原生或增强原生。适合直连 api.anthropic.com。")
+            self.subtitle_var.set("四模式：当前为 Anthropic 官方模式")
+            self.official_card.pack(fill="x", pady=(0, 12), before=self.advanced_card)
+        elif selected == PROVIDER_SEMI_OFFICIAL:
+            self.hero_title_var.set("半官方模式 v3 — 中转站 + Claude 原生协议")
+            self.hero_body_var.set("请求体用 Anthropic Messages API（含 computer_20251124），认证用 Bearer Token。中转站只要透传到 /messages 就能最大化 Claude 模型效果。beta 头可选填。")
+            self.subtitle_var.set("四模式：当前为半官方模式（中转站 + Claude 协议）")
             self.official_card.pack(fill="x", pady=(0, 12), before=self.advanced_card)
         elif selected == PROVIDER_OFFICIAL_COMPATIBLE:
             self.hero_title_var.set("官方体验兼容模式")
-            self.hero_body_var.set("底层仍走 OpenAI-compatible 中转站，但按官方 computer use 的单 computer 工具循环执行；适合比较官方风格效果。")
-            self.subtitle_var.set("三模式：当前为官方体验兼容模式")
+            self.hero_body_var.set("底层走 OpenAI-compatible 中转站，但按官方 computer use 的单 computer 工具循环执行。")
+            self.subtitle_var.set("四模式：当前为官方体验兼容模式")
             self.official_card.pack_forget()
         else:
             self.hero_title_var.set("兼容中转站的代理式 computer use")
             self.hero_body_var.set("这套模式保留中转站兼容，同时增加网页 DOM 工具。网页任务先读 DOM，桌面任务再走截图和本地执行器。")
-            self.subtitle_var.set("三模式：当前为兼容中转站模式")
+            self.subtitle_var.set("四模式：当前为兼容中转站模式")
             self.official_card.pack_forget()
         self._refresh_contract_hint()
+        self._refresh_advisor_card()
+
+    def _refresh_advisor_card(self) -> None:
+        if not hasattr(self, "advisor_body"):
+            return
+        for child in self.advisor_body.winfo_children():
+            child.destroy()
+        self.advisor_model_entry = None
+        self.refresh_advisor_models_button = None
+
+        if not self.advisor_enabled_var.get():
+            tk.Label(
+                self.advisor_body,
+                text="勾选上方启用顾问后展开配置。",
+                bg=PANEL,
+                fg=MUTED,
+                font=("Microsoft YaHei UI", 9),
+            ).pack(anchor="w")
+            return
+
+        is_official = self.provider_kind_var.get() == PROVIDER_ANTHROPIC_OFFICIAL
+        if is_official:
+            self._build_advisor_official(self.advisor_body)
+        else:
+            self._build_advisor_relay(self.advisor_body)
+
+    def _build_advisor_official(self, parent: tk.Widget) -> None:
+        self.advisor_source_var.set("inherit_main")
+        tk.Label(
+            parent,
+            text="顾问模型（Anthropic 官方）",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(0, 4))
+        options = [
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ]
+        ttk.Combobox(
+            parent,
+            textvariable=self.advisor_model_var,
+            values=options,
+            width=38,
+        ).pack(anchor="w", fill="x", pady=(0, 6), ipady=2)
+        tk.Label(
+            parent,
+            text="共用主模式的 API Key 和 api.anthropic.com，官方模式下顾问不允许跨厂商。",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 9),
+            wraplength=390,
+            justify="left",
+        ).pack(anchor="w")
+
+    def _build_advisor_relay(self, parent: tk.Widget) -> None:
+        radio_frame = tk.Frame(parent, bg=PANEL)
+        radio_frame.pack(fill="x", pady=(0, 6))
+        ttk.Radiobutton(
+            radio_frame,
+            text="继承主模型连接（同一中转站，只切模型）",
+            variable=self.advisor_source_var,
+            value="inherit_main",
+            command=self._refresh_advisor_card,
+        ).pack(anchor="w")
+        ttk.Radiobutton(
+            radio_frame,
+            text="自定义（另一个中转站 / Anthropic 官方直连）",
+            variable=self.advisor_source_var,
+            value="custom",
+            command=self._refresh_advisor_card,
+        ).pack(anchor="w")
+
+        fields = tk.Frame(parent, bg=PANEL)
+        fields.pack(fill="x", pady=(6, 0))
+        if self.advisor_source_var.get() == "custom":
+            self._add_entry(fields, "顾问接口地址", self.advisor_base_url_var)
+            self._add_entry(fields, "顾问 API Key", self.advisor_api_key_var, show="*")
+        self.advisor_model_entry, self.refresh_advisor_models_button = self._add_entry_with_button(
+            fields,
+            "顾问模型",
+            self.advisor_model_var,
+            button_text="⟳",
+            button_command=self.on_fetch_advisor_models,
+            button_tooltip="拉取顾问模型列表",
+        )
+        if self.advisor_source_var.get() == "inherit_main":
+            tk.Label(
+                fields,
+                text="⟳ 将使用上方主模型的接口地址和 API Key 拉取列表。",
+                bg=PANEL,
+                fg=MUTED,
+                font=("Microsoft YaHei UI", 9),
+                wraplength=390,
+                justify="left",
+            ).pack(anchor="w")
 
     def _refresh_contract_hint(self) -> None:
         beta, tool_type = guess_anthropic_computer_contract(self.model_var.get().strip())
         self.contract_hint_var.set(f"按当前模型建议自动填充：anthropic-beta={beta}，tool={tool_type}")
-        if self.provider_kind_var.get() == PROVIDER_ANTHROPIC_OFFICIAL:
+        if self.provider_kind_var.get() in {PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_SEMI_OFFICIAL}:
             if not self.anthropic_version_var.get().strip():
                 self.anthropic_version_var.set(ANTHROPIC_VERSION_DEFAULT)
             if not self.anthropic_beta_var.get().strip():
@@ -623,10 +818,22 @@ class App:
             pady=10,
         )
 
-    def _add_entry(self, parent: tk.Widget, label: str, variable: tk.StringVar, *, show: str | None = None, width: int = 40) -> tk.Entry:
+    def _add_entry(self, parent: tk.Widget, label: str, variable: tk.StringVar, *, show: str | None = None, width: int = 40, helper: str = "") -> tk.Entry:
         tk.Label(parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
         entry = self._styled_entry(parent, variable, show=show, width=width)
-        entry.pack(fill="x", pady=(0, 10), ipady=8)
+        if helper:
+            entry.pack(fill="x", pady=(0, 2), ipady=8)
+            tk.Label(
+                parent,
+                text=helper,
+                bg=parent.cget("bg"),
+                fg=MUTED,
+                font=("Microsoft YaHei UI", 8),
+                wraplength=380,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 10))
+        else:
+            entry.pack(fill="x", pady=(0, 10), ipady=8)
         return entry
 
     def _add_text(self, parent: tk.Widget, label: str, *, lines: int) -> tk.Text:
@@ -634,6 +841,70 @@ class App:
         widget = self._styled_text(parent, height=lines)
         widget.pack(fill="x", pady=(0, 10))
         return widget
+
+    def _add_entry_with_button(
+        self,
+        parent: tk.Widget,
+        label: str,
+        variable: tk.StringVar,
+        *,
+        button_text: str,
+        button_command,
+        button_tooltip: str = "",
+        show: str | None = None,
+    ) -> tuple[tk.Entry, tk.Button]:
+        tk.Label(parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        row = tk.Frame(parent, bg=parent.cget("bg"))
+        row.pack(fill="x", pady=(0, 10))
+        entry = self._styled_entry(parent, variable, show=show, width=10)
+        entry.pack(side="left", fill="x", expand=True, ipady=8)
+        button = tk.Button(
+            row,
+            text=button_text,
+            command=button_command,
+            bg=PANEL_ALT,
+            fg=ACCENT_ACTIVE,
+            activebackground="#F2EADF",
+            activeforeground=ACCENT_ACTIVE,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 13, "bold"),
+            padx=10,
+            pady=2,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+        )
+        button.pack(side="left", padx=(6, 0), ipady=4)
+        if button_tooltip:
+            self._attach_tooltip(button, button_tooltip)
+        return entry, button
+
+    def _attach_tooltip(self, widget: tk.Widget, text: str) -> None:
+        tip: dict[str, tk.Toplevel | None] = {"window": None}
+
+        def show(_event=None) -> None:
+            if tip["window"] is not None:
+                return
+            x = widget.winfo_rootx() + widget.winfo_width() + 6
+            y = widget.winfo_rooty()
+            tw = tk.Toplevel(self.root)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            tk.Label(
+                tw, text=text, bg="#2D261F", fg="#F6F2EA",
+                font=("Microsoft YaHei UI", 9),
+                padx=8, pady=4,
+            ).pack()
+            tip["window"] = tw
+
+        def hide(_event=None) -> None:
+            if tip["window"] is not None:
+                tip["window"].destroy()
+                tip["window"] = None
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
 
     def _configure_log_tags(self) -> None:
         self.log_text.tag_configure("prefix", foreground=MUTED)
@@ -692,11 +963,23 @@ class App:
         self.official_enhanced_var.set(bool(self.settings.get("official_enhanced", True)))
         self.enable_thinking_var.set(bool(self.settings.get("enable_thinking", False)))
         self.thinking_budget_var.set(str(self.settings.get("thinking_budget") or "2048"))
+        self.thinking_intensity_var.set(str(self.settings.get("thinking_intensity") or "medium"))
+        self.max_tokens_var.set(str(self.settings.get("max_tokens") or "4096"))
+        self.enable_compact_var.set(bool(self.settings.get("enable_compact", False)))
+        self.target_resolution_var.set(str(self.settings.get("target_resolution") or "1280x720"))
+        self.model_family_hint_var.set(str(self.settings.get("model_family_hint") or "auto"))
+        self.advisor_enabled_var.set(bool(self.settings.get("advisor_enabled", False)))
+        self.advisor_source_var.set(str(self.settings.get("advisor_source") or "inherit_main"))
+        self.advisor_model_var.set(str(self.settings.get("advisor_model") or "claude-opus-4-7"))
+        self.advisor_api_key_var.set(str(self.settings.get("advisor_api_key") or ""))
+        self.advisor_base_url_var.set(str(self.settings.get("advisor_base_url") or ""))
         self.scale_var.set(str(self.settings.get("scale") or "0.8"))
         self.jpeg_quality_var.set(str(self.settings.get("jpeg_quality") or "70"))
         self.max_steps_var.set(str(self.settings.get("max_steps") or "30"))
         self.confirm_var.set(bool(self.settings.get("confirm_actions", False)))
         self.hide_window_var.set(bool(self.settings.get("hide_window_while_running", True)))
+        self.visual_feedback_enabled_var.set(bool(self.settings.get("visual_feedback_enabled", True)))
+        self.color_scheme_var.set(str(self.settings.get("color_scheme") or "default"))
         self.browser_dom_var.set(bool(self.settings.get("browser_dom_enabled", True)))
         self.browser_dom_first_var.set(bool(self.settings.get("browser_dom_first", True)))
         self.browser_debug_host_var.set(str(self.settings.get("browser_debug_host") or "127.0.0.1"))
@@ -728,12 +1011,26 @@ class App:
         self.meta_var.set(f"模式：{mode_name} · 模型：{provider_config.model} · 最大步数：{session_config.max_steps}")
         self._append_log("系统", f"会话目录：{session_config.session_root}")
         self._append_log("系统", f"运行模式：{mode_name}")
+        self._append_log("系统", f"目标分辨率：{session_config.target_resolution} · 模型家族：{session_config.model_family_hint}")
+        if provider_config.enable_compact:
+            self._append_log("系统", "compact-2026-01-12 长对话压缩：已启用")
+        if provider_config.advisor_enabled:
+            self._append_log("系统", f"顾问模型：{provider_config.advisor_model}（失败时自动切换）")
         if provider_config.provider_kind == PROVIDER_ANTHROPIC_OFFICIAL:
             preview_provider = AnthropicOfficialProvider(provider_config)
             self._append_log("系统", f"anthropic-version={preview_provider.version}")
             self._append_log("系统", f"anthropic-beta={preview_provider.beta_header}")
             self._append_log("系统", f"computer tool={preview_provider.tool_type}")
             self._append_log("系统", f"官方模式：{'增强原生' if session_config.official_enhanced else '纯原生'}")
+        elif provider_config.provider_kind == PROVIDER_SEMI_OFFICIAL:
+            self._append_log("系统", "半官方模式 v3：Messages API 请求体 + Bearer Token 认证")
+            self._append_log("系统", f"computer tool={provider_config.anthropic_tool_type or 'computer_20251124'}")
+            if provider_config.anthropic_beta:
+                self._append_log("系统", f"anthropic-beta（手动）={provider_config.anthropic_beta}")
+            elif provider_config.enable_thinking or provider_config.enable_compact:
+                self._append_log("系统", "anthropic-beta 自动注入（仅 thinking/compact）")
+            else:
+                self._append_log("系统", "未启用 anthropic-beta 头（中转站透明转发模式）")
         elif provider_config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE:
             self._append_log("系统", "官方体验兼容：走 OpenAI-compatible 中转站，但只暴露单 computer 工具并禁用 DOM。")
         elif session_config.browser_dom_enabled:
@@ -824,6 +1121,233 @@ class App:
         for item in run_local_preflight(session_config):
             self.events.put(AgentEvent(kind="diagnostic", message=format_runtime_diagnostic(item)))
 
+    def on_fetch_models(self) -> None:
+        base_url = self.base_url_var.get().strip()
+        api_key = self.api_key_var.get().strip()
+        if not base_url:
+            messagebox.showerror("接口地址为空", "请先填写接口地址。", parent=self.root)
+            return
+        if not api_key:
+            messagebox.showerror("API Key 为空", "请先填写 API Key 才能拉取模型列表。", parent=self.root)
+            return
+        url = self._build_models_url(base_url)
+        try:
+            extra_headers = self._parse_json_object(
+                self.extra_headers_text.get("1.0", "end").strip(), "额外请求头 JSON"
+            )
+        except ValueError:
+            extra_headers = {}
+        merged_headers = self._build_fetch_headers(base_url, api_key, extra_headers)
+        self.refresh_models_button.configure(text="…", state="disabled")
+        threading.Thread(
+            target=self._fetch_models_worker,
+            args=(url, merged_headers, "main"),
+            daemon=True,
+        ).start()
+
+    def on_fetch_advisor_models(self) -> None:
+        if self.advisor_source_var.get() == "inherit_main":
+            base_url = self.base_url_var.get().strip()
+            api_key = self.api_key_var.get().strip()
+            err_prefix = "继承主模型连接时，"
+        else:
+            base_url = self.advisor_base_url_var.get().strip()
+            api_key = self.advisor_api_key_var.get().strip()
+            err_prefix = "自定义模式下，"
+        if not base_url:
+            messagebox.showerror("接口地址为空", f"{err_prefix}请先填写接口地址。", parent=self.root)
+            return
+        if not api_key:
+            messagebox.showerror("API Key 为空", f"{err_prefix}请先填写 API Key。", parent=self.root)
+            return
+        url = self._build_models_url(base_url)
+        try:
+            extra_headers = self._parse_json_object(
+                self.extra_headers_text.get("1.0", "end").strip(), "额外请求头 JSON"
+            )
+        except ValueError:
+            extra_headers = {}
+        merged_headers = self._build_fetch_headers(base_url, api_key, extra_headers)
+        if self.refresh_advisor_models_button is not None:
+            self.refresh_advisor_models_button.configure(text="…", state="disabled")
+        threading.Thread(
+            target=self._fetch_models_worker,
+            args=(url, merged_headers, "advisor"),
+            daemon=True,
+        ).start()
+
+    @staticmethod
+    def _build_fetch_headers(base_url: str, api_key: str, extra_headers: dict[str, Any]) -> dict[str, str]:
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "x-api-key": api_key,
+        }
+        for key, value in default_browser_headers(base_url).items():
+            headers.setdefault(key, value)
+        # If base_url IS api.anthropic.com, ensure at least a UA is present so
+        # /models still works through corporate proxies; ignored otherwise.
+        headers.setdefault("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
+        for key, value in (extra_headers or {}).items():
+            headers[str(key)] = str(value)
+        return headers
+
+    @staticmethod
+    def _build_models_url(base_url: str) -> str:
+        cleaned = base_url.strip().rstrip("/")
+        if cleaned.endswith("/models"):
+            return cleaned
+        for suffix in ("/chat/completions", "/messages", "/responses"):
+            if cleaned.endswith(suffix):
+                return cleaned[: -len(suffix)] + "/models"
+        if cleaned.endswith("/v1"):
+            return f"{cleaned}/models"
+        return f"{cleaned}/v1/models"
+
+    def _fetch_models_worker(self, url: str, headers: dict[str, str], target: str) -> None:
+        try:
+            request = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(request, timeout=15) as response:
+                raw = response.read().decode("utf-8")
+            data = json.loads(raw)
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")[:400]
+            except Exception:
+                pass
+            msg = f"HTTP {exc.code} {exc.reason}\n{body}".strip()
+            self.root.after(0, lambda m=msg, t=target: self._on_models_fetch_error(m, t))
+            return
+        except urllib.error.URLError as exc:
+            msg = f"网络错误：{exc.reason}"
+            self.root.after(0, lambda m=msg, t=target: self._on_models_fetch_error(m, t))
+            return
+        except json.JSONDecodeError as exc:
+            msg = f"接口返回非 JSON：{exc}"
+            self.root.after(0, lambda m=msg, t=target: self._on_models_fetch_error(m, t))
+            return
+        except Exception as exc:
+            msg = f"未知错误：{exc}"
+            self.root.after(0, lambda m=msg, t=target: self._on_models_fetch_error(m, t))
+            return
+
+        models = self._extract_model_names(data)
+        self.root.after(0, lambda t=target: self._on_models_fetched(models, t))
+
+    @staticmethod
+    def _extract_model_names(data: Any) -> list[str]:
+        names: list[str] = []
+        if isinstance(data, dict):
+            items = data.get("data") or data.get("models") or data.get("result") or []
+        elif isinstance(data, list):
+            items = data
+        else:
+            items = []
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict):
+                    name = item.get("id") or item.get("name") or item.get("model")
+                    if name:
+                        names.append(str(name))
+                elif isinstance(item, str):
+                    names.append(item)
+        # de-dup while preserving order
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for name in names:
+            if name not in seen:
+                seen.add(name)
+                deduped.append(name)
+        return deduped
+
+    def _restore_refresh_button(self, target: str) -> None:
+        button = self.refresh_models_button if target == "main" else self.refresh_advisor_models_button
+        if button is not None:
+            try:
+                button.configure(text="⟳", state="normal")
+            except tk.TclError:
+                pass
+
+    def _on_models_fetched(self, models: list[str], target: str) -> None:
+        self._restore_refresh_button(target)
+        if not models:
+            messagebox.showinfo("未找到模型", "接口返回为空。可能不支持 /models 端点。", parent=self.root)
+            return
+        self._show_models_popup(models, target)
+
+    def _on_models_fetch_error(self, message: str, target: str) -> None:
+        self._restore_refresh_button(target)
+        messagebox.showerror("拉取模型列表失败", message, parent=self.root)
+
+    def _show_models_popup(self, models: list[str], target: str) -> None:
+        if target == "advisor" and self.advisor_model_entry is not None:
+            anchor_entry = self.advisor_model_entry
+            target_var = self.advisor_model_var
+        else:
+            anchor_entry = self.model_entry
+            target_var = self.model_var
+        anchor_entry.update_idletasks()
+        anchor_x = anchor_entry.winfo_rootx()
+        anchor_y = anchor_entry.winfo_rooty() + anchor_entry.winfo_height() + 2
+        anchor_w = max(anchor_entry.winfo_width(), 280)
+
+        popup = tk.Toplevel(self.root)
+        popup.wm_overrideredirect(True)
+        popup.configure(bg=PANEL)
+        popup_height = min(320, max(120, len(models) * 22 + 12))
+        popup.geometry(f"{anchor_w + 50}x{popup_height}+{anchor_x}+{anchor_y}")
+        popup.configure(highlightbackground=BORDER, highlightthickness=1)
+
+        body = tk.Frame(popup, bg=PANEL)
+        body.pack(fill="both", expand=True, padx=1, pady=1)
+
+        scrollbar = ttk.Scrollbar(body, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+
+        listbox = tk.Listbox(
+            body,
+            bg="#FFFDFC",
+            fg=TEXT,
+            selectbackground=ACCENT_SOFT,
+            selectforeground=ACCENT_ACTIVE,
+            font=("Consolas", 10),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            activestyle="none",
+            yscrollcommand=scrollbar.set,
+        )
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.configure(command=listbox.yview)
+
+        current = target_var.get().strip()
+        current_idx: int | None = None
+        for i, name in enumerate(models):
+            display = f"  {name}  ✓" if name == current else f"  {name}"
+            listbox.insert("end", display)
+            if name == current:
+                current_idx = i
+        if current_idx is not None:
+            listbox.see(current_idx)
+            listbox.selection_set(current_idx)
+            listbox.activate(current_idx)
+
+        def commit(_event=None) -> None:
+            sel = listbox.curselection()
+            if sel:
+                target_var.set(models[sel[0]])
+            popup.destroy()
+
+        def cancel(_event=None) -> None:
+            popup.destroy()
+
+        listbox.bind("<Double-Button-1>", commit)
+        listbox.bind("<Return>", commit)
+        listbox.bind("<Escape>", cancel)
+        popup.bind("<FocusOut>", lambda _e: popup.after(200, lambda: popup.winfo_exists() and popup.destroy()))
+        listbox.focus_set()
+
     @staticmethod
     def _find_edge_executable() -> str:
         found = shutil.which("msedge.exe") or shutil.which("msedge")
@@ -843,17 +1367,188 @@ class App:
         self.run_hidden = True
         self.root.update_idletasks()
         self.root.iconify()
+        # Visual feedback layer launches alongside the main window hide
+        if self.visual_feedback_enabled_var.get():
+            self._start_visual_feedback()
 
     def _restore_window_if_hidden(self) -> None:
         if not self.run_hidden:
             return
         self.run_hidden = False
+        self._stop_visual_feedback()
         self.root.deiconify()
         self.root.lift()
         try:
             self.root.focus_force()
         except tk.TclError:
             pass
+
+    # ------------------------------------------------------------------
+    # Visual feedback layer (v3.2)
+    # ------------------------------------------------------------------
+
+    def _start_visual_feedback(self) -> None:
+        if self._overlay is not None or self._hud is not None:
+            return
+        try:
+            scheme = self.color_scheme_var.get().strip() or "default"
+            self._overlay = BreathingOverlay(self.root, color_scheme=scheme)
+            hud_position = self._load_hud_position()
+            hud_size = self._load_hud_size()
+            self._hud = FloatingHUD(
+                self.root,
+                position=hud_position,
+                size=hud_size,
+                on_close=self._on_hud_close,
+                on_restore=self._on_hud_restore,
+                on_stop=self._on_hud_stop,
+                on_resize=self._on_hud_resize,
+            )
+            self._overlay.set_state("startup")
+            self._last_agent_state = AGENT_STATE_MAIN_IDLE
+            build = check_windows_build()
+            if build < 19041:
+                self._append_log(
+                    "诊断",
+                    f"Windows build {build} < 19041，WDA_EXCLUDEFROMCAPTURE 不可用，overlay 可能出现在截图里。",
+                )
+        except Exception as exc:
+            self._append_log("警告", f"可视化反馈层启动失败：{exc}")
+            self._overlay = None
+            self._hud = None
+
+    def _stop_visual_feedback(self) -> None:
+        if self._hud is not None:
+            try:
+                self._save_hud_position(self._hud.get_position())
+                self._save_hud_size(self._hud.get_size())
+            except Exception:
+                pass
+            try:
+                self._hud.destroy()
+            except Exception:
+                pass
+            self._hud = None
+        if self._overlay is not None:
+            try:
+                self._overlay.destroy()
+            except Exception:
+                pass
+            self._overlay = None
+
+    def _on_hud_close(self) -> None:
+        if self._hud is not None:
+            try:
+                self._save_hud_position(self._hud.get_position())
+                self._save_hud_size(self._hud.get_size())
+                self._hud.destroy()
+            except Exception:
+                pass
+            self._hud = None
+
+    def _on_hud_restore(self) -> None:
+        self._restore_window_if_hidden()
+
+    def _on_hud_stop(self) -> None:
+        """悬浮窗中止按钮 — 触发与主窗"停止"按钮相同的行为。"""
+        try:
+            self.on_stop()
+        except Exception:
+            pass
+
+    def _on_hud_resize(self, w: int, h: int) -> None:
+        self._save_hud_size((w, h))
+
+    def _load_hud_position(self) -> tuple[int, int] | None:
+        raw = self.settings.get("hud_position")
+        if isinstance(raw, list) and len(raw) == 2:
+            try:
+                return (int(raw[0]), int(raw[1]))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _load_hud_size(self) -> tuple[int, int] | None:
+        raw = self.settings.get("hud_size")
+        if isinstance(raw, list) and len(raw) == 2:
+            try:
+                w, h = int(raw[0]), int(raw[1])
+                if w >= 200 and h >= 100:
+                    return (w, h)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _save_hud_position(self, position: tuple[int, int]) -> None:
+        try:
+            x, y = int(position[0]), int(position[1])
+        except (TypeError, ValueError, IndexError):
+            return
+        self.settings["hud_position"] = [x, y]
+        self._flush_settings()
+
+    def _save_hud_size(self, size: tuple[int, int]) -> None:
+        try:
+            w, h = int(size[0]), int(size[1])
+            if w < 200 or h < 100:
+                return
+        except (TypeError, ValueError, IndexError):
+            return
+        self.settings["hud_size"] = [w, h]
+        self._flush_settings()
+
+    def _flush_settings(self) -> None:
+        try:
+            SETTINGS_PATH.write_text(
+                json.dumps(self.settings, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _route_visual_event(self, event: AgentEvent) -> None:
+        """Route AgentEvent to overlay + HUD. Called from _consume_event."""
+        if self._overlay is None and self._hud is None:
+            return
+        kind = event.kind
+        payload = event.payload or {}
+
+        if kind == "status":
+            agent_state = payload.get("agent_state") or AGENT_STATE_MAIN_IDLE
+            self._last_agent_state = agent_state
+            if self._overlay is not None:
+                self._overlay.set_state(agent_state)
+            if self._hud is not None:
+                step_n = int(payload.get("step_n") or 0)
+                step_total = int(payload.get("step_total") or 0)
+                self._hud.update_status(agent_state, step_n, step_total)
+        elif kind == "assistant":
+            if self._hud is not None:
+                self._hud.update_thinking(event.message)
+        elif kind == "tool":
+            action_kind = payload.get("action_kind")
+            coord = payload.get("physical_coord")
+            extra = payload.get("action_extra") or {}
+            if self._hud is not None:
+                self._hud.update_action(event.message)
+            if action_kind and self._overlay is not None:
+                running_state = (
+                    AGENT_STATE_ADVISOR_RUNNING
+                    if self._last_agent_state == AGENT_STATE_ADVISOR_IDLE
+                    else AGENT_STATE_MAIN_RUNNING
+                )
+                self._overlay.set_state(running_state)
+                coord_tuple = tuple(coord) if coord is not None else None
+                self._overlay.flash_action(action_kind, coord_tuple, extra)
+        elif kind == "warning":
+            if self._overlay is not None:
+                self._overlay.set_state("warning")
+        elif kind == "error":
+            if self._overlay is not None:
+                self._overlay.set_state("error")
+        elif kind == "finished":
+            if self._overlay is not None:
+                self._overlay.set_state("done")
 
     def _run_agent(self, provider_config: ProviderConfig, session_config: SessionConfig, task: str) -> None:
         try:
@@ -889,8 +1584,9 @@ class App:
         if not task:
             raise ValueError("任务不能为空。")
 
+        target_resolution = self.target_resolution_var.get().strip() or "1280x720"
         scale = float(self.scale_var.get().strip())
-        if scale <= 0 or scale > 1:
+        if target_resolution == "scale" and (scale <= 0 or scale > 1):
             raise ValueError("截图缩放必须在 0 到 1 之间。")
         jpeg_quality = int(self.jpeg_quality_var.get().strip())
         if jpeg_quality < 40 or jpeg_quality > 95:
@@ -898,6 +1594,9 @@ class App:
         max_steps = int(self.max_steps_var.get().strip())
         if max_steps <= 0:
             raise ValueError("最大步数必须大于 0。")
+        max_tokens = int(self.max_tokens_var.get().strip() or "4096")
+        if max_tokens <= 0:
+            raise ValueError("max_tokens 必须大于 0。")
         browser_debug_port = int(self.browser_debug_port_var.get().strip() or "9222")
         if browser_debug_port <= 0 or browser_debug_port > 65535:
             raise ValueError("浏览器调试端口必须在 1 到 65535 之间。")
@@ -912,6 +1611,28 @@ class App:
         thinking_budget = int(self.thinking_budget_var.get().strip() or "2048")
         if thinking_budget <= 0:
             raise ValueError("thinking token 预算必须大于 0。")
+        thinking_intensity = self.thinking_intensity_var.get().strip() or "medium"
+        target_resolution = self.target_resolution_var.get().strip() or "1280x720"
+        model_family_hint = self.model_family_hint_var.get().strip() or "auto"
+
+        advisor_enabled = self.advisor_enabled_var.get()
+        if provider_kind == PROVIDER_ANTHROPIC_OFFICIAL:
+            advisor_source = "inherit_main"
+        else:
+            advisor_source = self.advisor_source_var.get().strip() or "inherit_main"
+        if advisor_enabled and advisor_source == "custom":
+            advisor_base_url = self.advisor_base_url_var.get().strip()
+            advisor_api_key = self.advisor_api_key_var.get().strip()
+            if not advisor_base_url:
+                raise ValueError("顾问模式选择了「自定义」，顾问接口地址不能为空。")
+            if not advisor_api_key:
+                raise ValueError("顾问模式选择了「自定义」，顾问 API Key 不能为空。")
+        else:
+            advisor_base_url = ""
+            advisor_api_key = ""
+        advisor_model = self.advisor_model_var.get().strip()
+        if advisor_enabled and not advisor_model:
+            raise ValueError("已启用顾问模型，顾问模型名不能为空。")
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         session_root = ROOT / "sessions" / timestamp
@@ -920,6 +1641,7 @@ class App:
             base_url=base_url,
             api_key=api_key,
             model=model,
+            max_tokens=max_tokens,
             extra_headers={str(key): str(value) for key, value in extra_headers.items()},
             extra_body=extra_body,
             anthropic_version=anthropic_version,
@@ -927,8 +1649,16 @@ class App:
             anthropic_tool_type=anthropic_tool_type,
             enable_thinking=self.enable_thinking_var.get(),
             thinking_budget=thinking_budget,
+            thinking_intensity=thinking_intensity,
+            enable_compact=self.enable_compact_var.get(),
+            advisor_enabled=self.advisor_enabled_var.get(),
+            advisor_source=advisor_source,
+            advisor_model=advisor_model,
+            advisor_api_key=advisor_api_key,
+            advisor_base_url=advisor_base_url,
         )
         session = SessionConfig(
+            target_resolution=target_resolution,
             scale=scale,
             jpeg_quality=jpeg_quality,
             max_steps=max_steps,
@@ -940,12 +1670,14 @@ class App:
             browser_debug_host=browser_debug_host,
             browser_debug_port=browser_debug_port,
             session_root=session_root,
+            model_family_hint=model_family_hint,
         )
         return provider, session, task
 
     def _collect_session_config_for_diagnostics(self) -> SessionConfig:
+        target_resolution = self.target_resolution_var.get().strip() or "1280x720"
         scale = float(self.scale_var.get().strip())
-        if scale <= 0 or scale > 1:
+        if target_resolution == "scale" and (scale <= 0 or scale > 1):
             raise ValueError("截图缩放必须在 0 到 1 之间。")
         jpeg_quality = int(self.jpeg_quality_var.get().strip())
         if jpeg_quality < 40 or jpeg_quality > 95:
@@ -954,12 +1686,14 @@ class App:
         if browser_debug_port <= 0 or browser_debug_port > 65535:
             raise ValueError("浏览器调试端口必须在 1 到 65535 之间。")
         return SessionConfig(
+            target_resolution=self.target_resolution_var.get().strip() or "1280x720",
             scale=scale,
             jpeg_quality=jpeg_quality,
             browser_dom_enabled=self.browser_dom_var.get(),
             browser_dom_first=self.browser_dom_first_var.get(),
             browser_debug_host=self.browser_debug_host_var.get().strip() or "127.0.0.1",
             browser_debug_port=browser_debug_port,
+            model_family_hint=self.model_family_hint_var.get().strip() or "auto",
         )
 
     @staticmethod
@@ -1030,6 +1764,12 @@ class App:
             self._set_analysis_text(event.message)
         elif event.kind == "snapshot" and event.snapshot_path:
             self.meta_var.set(f"最新截图：{event.snapshot_path.name}")
+
+        # Route to visual feedback layer (overlay + HUD)
+        try:
+            self._route_visual_event(event)
+        except Exception as exc:
+            self._append_log("警告", f"可视化事件路由失败：{exc}")
 
         self._append_log(self._prefix_text(event.kind), event.message)
 
@@ -1187,6 +1927,7 @@ class App:
     def _mode_name(provider_kind: str) -> str:
         return {
             PROVIDER_ANTHROPIC_OFFICIAL: "Anthropic 官方",
+            PROVIDER_SEMI_OFFICIAL: "半官方 (Messages API)",
             PROVIDER_OFFICIAL_COMPATIBLE: "官方体验兼容",
             PROVIDER_OPENAI_COMPATIBLE: "兼容中转站",
         }.get(provider_kind, "兼容中转站")
@@ -1210,11 +1951,23 @@ class App:
             "official_enhanced": self.official_enhanced_var.get(),
             "enable_thinking": self.enable_thinking_var.get(),
             "thinking_budget": self.thinking_budget_var.get().strip(),
+            "thinking_intensity": self.thinking_intensity_var.get().strip(),
+            "max_tokens": self.max_tokens_var.get().strip(),
+            "enable_compact": self.enable_compact_var.get(),
+            "target_resolution": self.target_resolution_var.get().strip(),
+            "model_family_hint": self.model_family_hint_var.get().strip(),
+            "advisor_enabled": self.advisor_enabled_var.get(),
+            "advisor_source": self.advisor_source_var.get().strip(),
+            "advisor_model": self.advisor_model_var.get().strip(),
+            "advisor_api_key": self.advisor_api_key_var.get().strip(),
+            "advisor_base_url": self.advisor_base_url_var.get().strip(),
             "scale": self.scale_var.get().strip(),
             "jpeg_quality": self.jpeg_quality_var.get().strip(),
             "max_steps": self.max_steps_var.get().strip(),
             "confirm_actions": self.confirm_var.get(),
             "hide_window_while_running": self.hide_window_var.get(),
+            "visual_feedback_enabled": self.visual_feedback_enabled_var.get(),
+            "color_scheme": self.color_scheme_var.get().strip(),
             "browser_dom_enabled": self.browser_dom_var.get(),
             "browser_dom_first": self.browser_dom_first_var.get(),
             "browser_debug_host": self.browser_debug_host_var.get().strip(),
@@ -1227,6 +1980,20 @@ class App:
 
 
 def launch() -> int:
+    # Per-monitor DPI awareness V2 so Tkinter/overlay coords match physical pixels.
+    # WindowsDesktopController also sets this on first instantiation, but the UI
+    # creates Tk before the controller; setting it here is safer.
+    try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+    except Exception:
+        pass
     root = tk.Tk()
     App(root)
     root.mainloop()

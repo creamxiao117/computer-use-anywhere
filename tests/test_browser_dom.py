@@ -10,7 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from claude_computer_use_proxy.browser_dom import BrowserDomController
+from computer_use_anywhere.browser_dom import BrowserDomController
 
 
 class BrowserDomTests(unittest.TestCase):

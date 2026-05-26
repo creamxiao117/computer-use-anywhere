@@ -4,5 +4,7 @@ __all__ = [
     "provider",
     "ui",
     "windows_control",
+    "mcp_server",
+    "skills",
 ]
 

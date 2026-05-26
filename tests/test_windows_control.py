@@ -10,8 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from claude_computer_use_proxy.models import SessionConfig
-from claude_computer_use_proxy.windows_control import WindowsDesktopController
+from computer_use_anywhere.models import SessionConfig
+from computer_use_anywhere.windows_control import WindowsDesktopController
 
 
 class WindowsControlTests(unittest.TestCase):
@@ -83,13 +83,13 @@ class WindowsControlTests(unittest.TestCase):
 
     def test_foreground_guard_rejects_own_window_for_typing(self) -> None:
         controller = WindowsDesktopController.__new__(WindowsDesktopController)
-        controller.settings = SessionConfig(own_window_title="Claude 电脑操作代理")
-        controller.get_foreground_window_title = lambda: "Claude 电脑操作代理"
+        controller.settings = SessionConfig(own_window_title="Computer Use Anywhere")
+        controller.get_foreground_window_title = lambda: "Computer Use Anywhere"
         self.assertFalse(controller.is_foreground_safe_for_action({"action": "type", "text": "hello"}))
 
     def test_foreground_guard_checks_expected_window_title(self) -> None:
         controller = WindowsDesktopController.__new__(WindowsDesktopController)
-        controller.settings = SessionConfig(own_window_title="Claude 电脑操作代理")
+        controller.settings = SessionConfig(own_window_title="Computer Use Anywhere")
         controller.get_foreground_window_title = lambda: "Bilibili - Microsoft Edge"
         self.assertTrue(
             controller.is_foreground_safe_for_action(

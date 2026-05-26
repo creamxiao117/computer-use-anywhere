@@ -13,32 +13,102 @@ Windows 本地版 Computer Use 框架。项目目标是在 Windows 桌面上直�
 
 ---
 
+## 启动方式
+
+本项目提供两种启动方式：
+
+1. 下载 Release 版 EXE，双击运行；
+2. 从源码运行 `python run.py`。
+
+普通用户推荐使用 Release 版 EXE，不需要配置 Python 环境。
+
+### 方式一：下载 Release 版 EXE（推荐）
+
+适合只想直接使用的用户。
+
+1. 打开本项目 GitHub Releases 页面；
+2. 下载最新版本的 `ComputerUseAnywhere-portable.zip`；
+3. 解压压缩包；
+4. 进入解压后的目录；
+5. 双击运行：
+
+```powershell
+ComputerUseAnywhere.exe
+```
+
+如果你是从源码打包后的目录运行，EXE 路径一般是：
+
+```powershell
+dist\ComputerUseAnywhere\ComputerUseAnywhere.exe
+```
+
+### 方式二：从源码运行
+
+适合开发者，或者需要修改源码后再运行的人。
+
+```powershell
+python run.py
+```
+
+如果提示缺少依赖，请先安装项目依赖后再运行。
+
 ## 快速上手
 
-1. 双击运行：
+启动程序后，按下面步骤配置：
 
-   ```text
-   dist\ComputerUseAnywhere\ComputerUseAnywhere.exe
-   ```
+1. **接口地址**  
+   填你的中转站地址或官方 API 地址。  
+   末尾 `/` 可加可不加，`/v1`、`/chat/completions`、`/messages`、`/models` 会自动适配。
 
-2. 在界面里填写：
+2. **API Key**  
+   填你的 API Key。  
+   中转站一般使用 Bearer Token；官方 Anthropic 直连使用 `x-api-key`。
 
-   - **接口地址**：中转站或官方 API 地址
-   - **API Key**：你的 key
-   - **模型**：手动填写，或点击输入框右侧 **⟳** 拉取模型列表
-   - **目标分辨率**：推荐先用 `1280x720`
-   - **任务**：写清楚具体操作目标
+3. **模型**  
+   可以手动填写模型名，也可以点击输入框右侧的 **⟳** 按钮拉取可用模型列表。
 
-3. 示例任务：
+4. **运行模式**  
+   - 中转站只有 `/chat/completions`：优先用 **兼容模式**
+   - 中转站支持 `/messages`：优先用 **半官方模式 v3**
+   - 直连 `api.anthropic.com`：使用 **官方模式**
 
-   ```text
-   打开记事本，输入 hello world，保存到桌面，文件名为 test.txt。
-   ```
+5. **目标分辨率**  
+   推荐保持默认：
 
-4. 点击 **开始运行**。
+```text
+1280x720
+```
 
----
+这是最稳定的通用配置。
 
+6. **填写任务**
+
+示例：
+
+```text
+打开记事本，输入 hello world，并保存到桌面。
+```
+
+7. 点击 **开始运行**
+
+## 推荐配置
+
+普通中转站用户推荐：
+
+```text
+模式：半官方模式 v3（如果中转站支持 /messages）
+目标分辨率：1280x720
+max_tokens：4096
+最大步数：30
+浏览器 DOM：网页任务时开启
+```
+
+如果中转站不支持 `/messages`，就改用：
+
+```text
+模式：兼容模式
+接口：/chat/completions
+```
 ## 运行模式
 
 | 模式 | 请求协议 | 认证方式 | 适用场景 |

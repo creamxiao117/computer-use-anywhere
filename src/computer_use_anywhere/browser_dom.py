@@ -443,7 +443,7 @@ class _SimpleWebSocket:
         self._send_frame(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
     def recv_json(self) -> dict[str, Any]:
-        payload = self._recv_frame()
+        payload = self._recv_message()
         try:
             decoded = json.loads(payload.decode("utf-8"))
         except json.JSONDecodeError as exc:
@@ -452,10 +452,48 @@ class _SimpleWebSocket:
             raise BrowserDomError(f"WebSocket 返回格式异常：{decoded!r}")
         return decoded
 
-    def _send_frame(self, payload: bytes) -> None:
+    def _recv_message(self) -> bytes:
+        """读取一个完整 WebSocket 消息，按 RFC 6455 自动重组分片帧与控制帧。
+
+        原实现只读首个帧：Chrome 对较大 CDP 响应（如 read_page 的整页 DOM 摘要）
+        会分片发送，导致解析失败或误判连接关闭。这里持续读取直到 FIN 帧，并把所有
+        续帧(opcode=0x0)拼回消息体；同时正确回应 ping、忽略 pong、识别 close。
+        """
         if self.sock is None:
             raise BrowserDomError("WebSocket 未连接。")
-        header = bytearray([0x81])
+        chunks: list[bytes] = []
+        while True:
+            first = self._recv_exact(2)
+            fin = bool(first[0] & 0x80)
+            frame_opcode = first[0] & 0x0F
+            masked = bool(first[1] & 0x80)
+            length = first[1] & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self._recv_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self._recv_exact(8))[0]
+            mask = self._recv_exact(4) if masked else b""
+            payload = self._recv_exact(length)
+            if masked:
+                payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+            if frame_opcode == 0x8:  # close
+                raise BrowserDomError("WebSocket 已关闭。")
+            if frame_opcode == 0x9:  # ping -> 回 pong
+                self._send_frame(payload, opcode=0xA)
+                continue
+            if frame_opcode == 0xA:  # pong，忽略
+                continue
+            if frame_opcode == 0x0:  # 续帧：追加到当前消息
+                chunks.append(payload)
+            else:  # 首帧/新消息：重置
+                chunks = [payload]
+            if fin:
+                return b"".join(chunks)
+
+    def _send_frame(self, payload: bytes, *, opcode: int = 0x1) -> None:
+        if self.sock is None:
+            raise BrowserDomError("WebSocket 未连接。")
+        header = bytearray([0x80 | opcode])
         length = len(payload)
         if length < 126:
             header.append(0x80 | length)
@@ -470,25 +508,8 @@ class _SimpleWebSocket:
         self.sock.sendall(bytes(header) + mask + masked)
 
     def _recv_frame(self) -> bytes:
-        if self.sock is None:
-            raise BrowserDomError("WebSocket 未连接。")
-        first = self._recv_exact(2)
-        opcode = first[0] & 0x0F
-        if opcode == 0x8:
-            raise BrowserDomError("WebSocket 已关闭。")
-        if opcode not in {0x1, 0x2}:
-            return self._recv_frame()
-        masked = bool(first[1] & 0x80)
-        length = first[1] & 0x7F
-        if length == 126:
-            length = struct.unpack("!H", self._recv_exact(2))[0]
-        elif length == 127:
-            length = struct.unpack("!Q", self._recv_exact(8))[0]
-        mask = self._recv_exact(4) if masked else b""
-        payload = self._recv_exact(length)
-        if masked:
-            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-        return payload
+        # 兼容旧调用：新代码统一走 _recv_message
+        return self._recv_message()
 
     def _recv_exact(self, size: int) -> bytes:
         if self.sock is None:

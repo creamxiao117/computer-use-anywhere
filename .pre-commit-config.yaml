@@ -1,0 +1,108 @@
+# ---------------------------------------------------------------------------
+# Pre-commit quality gate — computer-use-anywhere (cua_src)
+#
+# Revisions are PINNED to match the toolchain validated locally:
+#   ruff 0.16.1 · pre-commit 4.6.1 · pytest 9.1.1
+#
+# Division of responsibility (dual gate):
+#   1. pre-commit (this file) — fast, local, blocks the COMMIT / PUSH.
+#      Catches formatting + lint before code ever leaves the workstation.
+#   2. GitHub Actions (.github/workflows/ci.yml) — authoritative, blocks the MERGE.
+#      A developer can bypass pre-commit with `git commit --no-verify`;
+#      they cannot bypass a required status check. CI is the real gate.
+#
+# One-time local setup:
+#   pre-commit install                      # installs pre-commit + pre-push hooks
+#   pre-commit run --all-files              # baseline the whole tree
+#
+# Bypass (use sparingly, CI will still catch it):
+#   git commit --no-verify
+# ---------------------------------------------------------------------------
+
+minimum_pre_commit_version: "3.5.0"
+
+# `pre-commit install` wires up BOTH the commit-time and push-time hooks.
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+# Never lint vendored / generated trees.
+exclude: |
+  (?x)^(
+      \.git/
+    | \.ruff_cache/
+    | \.pytest_cache/
+    | build/
+    | dist/
+    | _mvtest_dst/
+  )
+
+repos:
+  # --- Baseline hygiene -----------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]   # keep intentional MD hard breaks
+      - id: end-of-file-fixer
+      - id: check-yaml                        # validates this file + ci.yml
+      - id: check-added-large-files
+        args: [--maxkb=1024]                  # screenshots/GIFs belong in Releases
+      - id: check-merge-conflict
+
+  # --- Lint + format (ruff) -------------------------------------------------
+  # Hook ids at v0.16.1: `ruff-check`, `ruff-format`, and `ruff` (legacy alias).
+  # We use `ruff-check` — `ruff` is explicitly deprecated upstream at this rev.
+  # `--config ruff.toml` makes rule resolution deterministic instead of relying
+  # on ruff's parent-directory discovery (this repo is consumed as a submodule,
+  # so ambient discovery could pick up the SUPERPROJECT's config).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      # The two hooks below are deliberately ASYMMETRIC. Both FAIL the commit in
+      # exactly the situations CI fails, so neither weakens the gate — they
+      # differ only in whether they REPAIR the tree for you:
+      #
+      #   ruff-check  = verify-only (no `--fix`). `--fix` would resolve only a
+      #                 minority of findings, leave the rest failing anyway, and
+      #                 scatter mechanical edits through a diff under review.
+      #                 Little gain, real cost. Fix explicitly when you want it:
+      #                     ruff check --config ruff.toml --fix .
+      #
+      #   ruff-format = WRITE mode (no `--check`). Formatting is a total,
+      #                 deterministic, semantics-preserving function — there is
+      #                 exactly one correct output, so auto-applying it always
+      #                 fully resolves the failure. This is the canonical
+      #                 pre-commit workflow: hook rewrites -> commit fails ->
+      #                 you re-stage and commit again.
+      #
+      # => Running `pre-commit run --all-files` on a dirty tree WILL rewrite
+      #    files. That is intended. Land formatting as its own `style:` commit
+      #    (and add it to .git-blame-ignore-revs) before starting logic work,
+      #    so churn never rides along with a behavioural change.
+      #    To verify without touching the tree, use CI's command instead:
+      #        ruff format --config ruff.toml --check --diff .
+      - id: ruff-check
+        name: ruff check (lint)
+        args: [--config, ruff.toml]
+      - id: ruff-format
+        name: ruff format
+        args: [--config, ruff.toml]
+
+  # --- Test suite (push-time only) -----------------------------------------
+  # pytest is deliberately NOT a commit-time hook: the suite is whole-repo, so
+  # it cannot be scoped to staged files, and paying that cost on every commit
+  # trains developers to use --no-verify. It runs at PUSH time as a last local
+  # safety net, and CI remains the authoritative test gate.
+  #
+  # Requires `pytest` on PATH. Skip locally with:  SKIP=pytest git push
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (full suite — pre-push only)
+        entry: pytest
+        args: [-q]
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

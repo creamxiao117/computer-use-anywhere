@@ -1,0 +1,131 @@
+# ---------------------------------------------------------------------------
+# CI — computer-use-anywhere
+#
+# This repo is consumed as a git submodule by the Fan-ComputerUse superproject,
+# but it is ALSO a standalone repo — this workflow lives at ITS root, so all
+# paths below are relative to the submodule's own root (`.` == cua_src/).
+# `submodules: recursive` is set so the checkout stays correct if this repo
+# ever gains nested submodules of its own.
+#
+# Platform split (deliberate — see note):
+#   lint  -> ubuntu-latest   (ruff is platform-independent; fast + cheap)
+#   test  -> windows-latest  (REQUIRED — see below)
+#
+# WHY tests cannot run on ubuntu:
+#   src/computer_use_anywhere/windows_control.py does, at MODULE level:
+#       from ctypes import wintypes        # raises ValueError on Linux
+#       user32 = ctypes.windll.user32      # AttributeError on Linux
+#   and tests/test_windows_control.py imports WindowsDesktopController at module
+#   level with no platform guard. On a Linux runner pytest fails during
+#   COLLECTION, not assertion. This is a Windows-native framework; running its
+#   suite on Windows is correct, not a workaround.
+#   If cross-platform test coverage is wanted later, add platform skip markers
+#   to the Windows-only tests, then add an ubuntu leg to the `test` job.
+# ---------------------------------------------------------------------------
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to the same ref supersedes in-flight runs.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  RUFF_VERSION: "0.16.1"
+  PYTEST_VERSION: "9.1.1"
+
+jobs:
+  lint:
+    name: Lint (ruff ${{ '0.16.1' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install ruff (pinned to match local pre-commit hook)
+        run: python -m pip install --upgrade pip "ruff==${{ env.RUFF_VERSION }}"
+
+      - name: ruff check
+        run: ruff check --config ruff.toml --output-format=github .
+
+      - name: ruff format --check
+        run: ruff format --config ruff.toml --check --diff .
+
+  test:
+    name: Tests (pytest, windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # `-e .` pulls Pillow + numpy from pyproject.toml, so runtime deps stay
+      # declared in exactly one place.
+      - name: Install project + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install "pytest==${{ env.PYTEST_VERSION }}"
+
+      # Suite baseline at time of writing: 75 passed, 5 xfailed -> exit 0.
+      #
+      # ON-CALL NOTE — a RED build reporting `[XPASS(strict)]` is GOOD NEWS.
+      # The 5 xfails are `xfail(strict=True)` markers recording a confirmed but
+      # unfixed defect (replay.py `lowered_result` computed-but-unused, so
+      # English failure keywords are not detected). When that defect is fixed
+      # the tests start PASSING, strict mode turns that into XPASS, and the exit
+      # code flips to 1 by design — it is a reminder to delete the marker, not a
+      # regression. Fix = remove the xfail marker; do NOT "fix" it by relaxing
+      # strict mode.
+      #
+      # Coverage is deliberately NOT enabled here. If you add it, give coverage
+      # its own data file (`COVERAGE_FILE`) rather than sharing the default
+      # `.coverage`, so parallel/rerun jobs cannot race on it.
+      - name: pytest
+        run: pytest -q
+
+  # Single required status check for branch protection: stays green only if
+  # BOTH jobs above succeed, and correctly fails on skipped/cancelled legs.
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: always()
+    steps:
+      - name: Verify all upstream jobs succeeded
+        run: |
+          echo "lint=${{ needs.lint.result }} test=${{ needs.test.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "::error::CI gate failed — one or more required jobs did not succeed."
+            exit 1
+          fi
+          echo "All required jobs succeeded."

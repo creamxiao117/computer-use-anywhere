@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# Normalize line endings in the repository.
+#
+# WHY: a contributor with `core.autocrlf=false` (Linux/macOS default, or a
+# Windows git installed with the wrong option) would otherwise commit CRLF and
+# silently turn the "pure format" style commit into a full-file line-ending
+# flip — invisible in `--shortstat`, invisible in review. Forcing LF on
+# checkout makes ruff (line-ending="auto") follow the worktree automatically,
+# so the format gate never goes permanently red on Windows either.
+#
+# ruff.toml intentionally keeps line-ending="auto" (NOT forced to "lf"): with
+# autocrlf=true a forced "lf" would fight the CRLF checkout and
+# `ruff format --check` would fail on every file. .gitattributes is the correct
+# lever. (SRE/code-review decision; see .pre-commit-config.yaml.)
+# ---------------------------------------------------------------------------
+* text=auto
+*.py text eol=lf

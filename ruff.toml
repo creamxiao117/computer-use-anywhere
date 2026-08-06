@@ -1,0 +1,72 @@
+# Ruff configuration for Computer-Use-Anywhere
+# Kept in a standalone ruff.toml (NOT pyproject.toml) to avoid conflicting with
+# concurrent edits to pytest.ini / .pre-commit-config.yaml by other tooling.
+#
+# Run:
+#   ruff check src tests
+#   ruff format --check src tests
+
+target-version = "py311"
+line-length = 100
+
+exclude = [
+    "_mvtest_dst",
+    "__pycache__",
+    ".git",
+    "*.egg-info",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[lint]
+# E   pycodestyle errors
+# F   pyflakes            -> correctness (undefined names, unused imports)
+# I   isort               -> import ordering
+# B   flake8-bugbear      -> likely bugs & design problems (includes B9xx opinionated)
+# C4  flake8-comprehensions
+# UP  pyupgrade           -> modern py311+ syntax
+# SIM flake8-simplify
+# PIE flake8-pie
+# S   flake8-bandit       -> SECURITY (built into ruff, no extra plugin needed)
+select = ["E", "F", "I", "B", "C4", "UP", "SIM", "PIE", "S"]
+
+# Opinionated bugbear "B9" rules that ruff implements: B904 (raise ... from) and
+# B905 (zip strict=). Both are already covered by the "B" prefix above and are
+# listed here only to make the intent explicit and prevent accidental removal.
+# NOTE: flake8-bugbear's B950 (line-length with tolerance) is NOT implemented by
+# ruff, so plain E501 at line-length=100 is used instead.
+extend-select = ["B904", "B905"]
+
+ignore = []
+
+[lint.per-file-ignores]
+# Tests legitimately use assert, hardcoded fixtures, and subprocess calls.
+# E402: every test module must insert src/ into sys.path BEFORE importing the
+# package under test — the imports are deliberately not at the top of the file.
+"tests/**/*.py" = [
+    "E402",  # sys.path bootstrap precedes package imports (intentional)
+    "S101",  # assert used
+    "S105",  # hardcoded password string (test fixtures)
+    "S106",  # hardcoded password func arg
+    "S311",  # pseudo-random generators
+    "S603",  # subprocess call
+    "S607",  # start process with partial path
+]
+"scripts/**/*.py" = ["S603", "S607"]
+# run.py sets per-monitor DPI awareness before importing Tkinter-dependent code.
+"run.py" = ["E402"]
+
+[lint.isort]
+known-first-party = ["computer_use_anywhere"]
+
+[lint.mccabe]
+# NOTE: inert until "C901" is added to `select` above. Left here pre-tuned so
+# complexity gating can be switched on in one line once the backlog is burnt
+# down (ui.py / visual_overlay.py will need refactoring first).
+max-complexity = 12
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

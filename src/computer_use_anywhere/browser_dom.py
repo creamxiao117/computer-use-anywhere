@@ -242,7 +242,11 @@ class BrowserDomController:
 """ % json.dumps(selector, ensure_ascii=False)
             result = self._runtime_eval(page, expression)
             parsed = self._parse_json_value(result)
-            if isinstance(parsed, dict) and parsed.get("ok") and (parsed.get("visible") or arguments.get("allow_hidden")):
+            if (
+                isinstance(parsed, dict)
+                and parsed.get("ok")
+                and (parsed.get("visible") or arguments.get("allow_hidden"))
+            ):
                 return self._format_json_result(f"已等待到选择器“{selector}”", parsed)
             time.sleep(0.35)
         raise BrowserDomError(f"等待 {timeout_seconds:.1f} 秒后仍未找到选择器“{selector}”。")
@@ -308,14 +312,20 @@ class BrowserDomController:
         if not script:
             raise BrowserDomError("evaluate 需要提供 script。")
         page = self._select_page(arguments)
-        result = self._runtime_eval(page, script, await_promise=bool(arguments.get("await_promise", False)))
+        result = self._runtime_eval(
+            page, script, await_promise=bool(arguments.get("await_promise", False))
+        )
         return self._format_json_result("JS 执行结果", result)
 
     def _select_page(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pages = self._list_pages()
         if not pages:
-            raise BrowserDomError("没有找到可操作的浏览器页面。请确认 Chrome/Edge 已用 --remote-debugging-port 启动。")
-        target = str(arguments.get("target") or arguments.get("url_contains") or "").strip().casefold()
+            raise BrowserDomError(
+                "没有找到可操作的浏览器页面。请确认 Chrome/Edge 已用 --remote-debugging-port 启动。"
+            )
+        target = (
+            str(arguments.get("target") or arguments.get("url_contains") or "").strip().casefold()
+        )
         if target:
             for page in pages:
                 haystack = f"{page.get('title') or ''} {page.get('url') or ''}".casefold()
@@ -343,7 +353,9 @@ class BrowserDomController:
         ]
         return pages
 
-    def _runtime_eval(self, page: dict[str, Any], expression: str, *, await_promise: bool = False) -> Any:
+    def _runtime_eval(
+        self, page: dict[str, Any], expression: str, *, await_promise: bool = False
+    ) -> Any:
         response = self._cdp_call(
             page,
             "Runtime.evaluate",
@@ -358,7 +370,9 @@ class BrowserDomController:
             raise BrowserDomError(f"JS 执行异常：{response['result']['exceptionDetails']}")
         return result.get("value")
 
-    def _cdp_call(self, page: dict[str, Any], method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _cdp_call(
+        self, page: dict[str, Any], method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         ws_url = str(page.get("webSocketDebuggerUrl") or "")
         if not ws_url:
             raise BrowserDomError("页面缺少 webSocketDebuggerUrl。")
@@ -425,7 +439,9 @@ class _SimpleWebSocket:
         if b" 101 " not in response.split(b"\r\n", 1)[0]:
             sock.close()
             raise BrowserDomError(f"WebSocket 握手失败：{response[:200]!r}")
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest())
+        accept = base64.b64encode(
+            hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
+        )
         if accept not in response:
             sock.close()
             raise BrowserDomError("WebSocket 握手校验失败。")

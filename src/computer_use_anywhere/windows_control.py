@@ -36,7 +36,9 @@ OPUS_4_7_MAX_LONG_EDGE = 2576
 OPUS_4_7_MAX_PIXELS = 3_750_000
 
 
-def compute_max_api_fit(native_w: int, native_h: int, max_long_edge: int, max_pixels: int) -> tuple[int, int]:
+def compute_max_api_fit(
+    native_w: int, native_h: int, max_long_edge: int, max_pixels: int
+) -> tuple[int, int]:
     """Calculate the optimal downscaled resolution that uses full API pixel budget without distortion."""
     aspect = native_w / native_h
     h_from_pixels = math.sqrt(max_pixels / aspect)
@@ -52,7 +54,9 @@ def compute_max_api_fit(native_w: int, native_h: int, max_long_edge: int, max_pi
     return max(1, int(w)), max(1, int(h))
 
 
-def resolve_capture_resolution(actual_w: int, actual_h: int, target_resolution: str, model_family: str = "auto") -> tuple[int, int]:
+def resolve_capture_resolution(
+    actual_w: int, actual_h: int, target_resolution: str, model_family: str = "auto"
+) -> tuple[int, int]:
     """Resolve the final screenshot dimensions based on target resolution strategy."""
     if target_resolution == "1280x720":
         return 1280, 720
@@ -61,9 +65,13 @@ def resolve_capture_resolution(actual_w: int, actual_h: int, target_resolution: 
     if target_resolution == "max_api_fit":
         family = model_family.lower()
         if "opus_4_7" in family or "opus-4.7" in family or "opus 4.7" in family:
-            return compute_max_api_fit(actual_w, actual_h, OPUS_4_7_MAX_LONG_EDGE, OPUS_4_7_MAX_PIXELS)
+            return compute_max_api_fit(
+                actual_w, actual_h, OPUS_4_7_MAX_LONG_EDGE, OPUS_4_7_MAX_PIXELS
+            )
         # Default to Claude 4.6 family limits for safety
-        return compute_max_api_fit(actual_w, actual_h, CLAUDE_4_6_MAX_LONG_EDGE, CLAUDE_4_6_MAX_PIXELS)
+        return compute_max_api_fit(
+            actual_w, actual_h, CLAUDE_4_6_MAX_LONG_EDGE, CLAUDE_4_6_MAX_PIXELS
+        )
     # Legacy scale mode: keep proportional scaling
     scale = float(target_resolution) if target_resolution.replace(".", "").isdigit() else 0.8
     return max(1, int(round(actual_w * scale))), max(1, int(round(actual_h * scale)))
@@ -190,7 +198,9 @@ class WindowsDesktopController:
     def __init__(self, settings: SessionConfig) -> None:
         _set_dpi_awareness()
         self.settings = settings
-        self.session_root = settings.session_root or Path.cwd() / "sessions" / time.strftime("%Y%m%d-%H%M%S")
+        self.session_root = settings.session_root or Path.cwd() / "sessions" / time.strftime(
+            "%Y%m%d-%H%M%S"
+        )
         self.session_root.mkdir(parents=True, exist_ok=True)
         self._snapshot_index = 0
         self._last_masked_regions_actual: list[tuple[int, int, int, int]] = []
@@ -198,7 +208,10 @@ class WindowsDesktopController:
         self.actual_width = int(user32.GetSystemMetrics(0))
         self.actual_height = int(user32.GetSystemMetrics(1))
         self.capture_width, self.capture_height = resolve_capture_resolution(
-            self.actual_width, self.actual_height, self.settings.target_resolution, self.settings.model_family_hint
+            self.actual_width,
+            self.actual_height,
+            self.settings.target_resolution,
+            self.settings.model_family_hint,
         )
         # 可视化反馈层用：保存上一次 _perform() 期间记录的动作细节，
         # 供 execute() 组装 ActionResult 时取用。每次 execute() 开始前会清空。
@@ -217,7 +230,10 @@ class WindowsDesktopController:
             if masked_rect is not None:
                 self._last_masked_regions_actual = [masked_rect]
         self.capture_width, self.capture_height = resolve_capture_resolution(
-            actual_width, actual_height, self.settings.target_resolution, self.settings.model_family_hint
+            actual_width,
+            actual_height,
+            self.settings.target_resolution,
+            self.settings.model_family_hint,
         )
         self._last_masked_regions_capture = []
         for rect in self._last_masked_regions_actual:
@@ -231,8 +247,12 @@ class WindowsDesktopController:
         self._snapshot_index += 1
         path = self.session_root / f"{self._snapshot_index:03d}_{label}.jpg"
         buffer = io.BytesIO()
-        image.convert("RGB").save(path, format="JPEG", quality=self.settings.jpeg_quality, optimize=True)
-        image.convert("RGB").save(buffer, format="JPEG", quality=self.settings.jpeg_quality, optimize=True)
+        image.convert("RGB").save(
+            path, format="JPEG", quality=self.settings.jpeg_quality, optimize=True
+        )
+        image.convert("RGB").save(
+            buffer, format="JPEG", quality=self.settings.jpeg_quality, optimize=True
+        )
         return Snapshot(
             path=path,
             data_url=f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}",
@@ -266,7 +286,14 @@ class WindowsDesktopController:
 
     def is_action_targeting_masked_region(self, arguments: dict[str, Any]) -> bool:
         action = str(arguments.get("action") or "").strip().lower()
-        if action in {"left_click", "double_click", "right_click", "middle_click", "mouse_move", "scroll"}:
+        if action in {
+            "left_click",
+            "double_click",
+            "right_click",
+            "middle_click",
+            "mouse_move",
+            "scroll",
+        }:
             coordinate = self._optional_coordinate(arguments.get("coordinate"))
             if coordinate != (None, None):
                 return self._coordinate_in_masked_region(*coordinate)
@@ -323,7 +350,9 @@ class WindowsDesktopController:
         return False
 
     def is_own_window_foreground(self) -> bool:
-        return self._titles_match(self.get_foreground_window_title(), self.settings.own_window_title)
+        return self._titles_match(
+            self.get_foreground_window_title(), self.settings.own_window_title
+        )
 
     def is_foreground_safe_for_action(self, arguments: dict[str, Any]) -> bool:
         if not self.requires_foreground_app(arguments):
@@ -343,7 +372,9 @@ class WindowsDesktopController:
         if not expected_title:
             return ""
         current_title = self.get_foreground_window_title()
-        if self._title_contains(current_title, expected_title) and not self._titles_match(current_title, self.settings.own_window_title):
+        if self._title_contains(current_title, expected_title) and not self._titles_match(
+            current_title, self.settings.own_window_title
+        ):
             return ""
         return self.activate_window_by_title(expected_title)
 
@@ -374,7 +405,10 @@ class WindowsDesktopController:
         coordinate = arguments.get("coordinate")
         start_coordinate = arguments.get("start_coordinate")
         end_coordinate = arguments.get("end_coordinate")
-        if action in {"left_click", "double_click", "right_click", "middle_click", "mouse_move"} and coordinate:
+        if (
+            action in {"left_click", "double_click", "right_click", "middle_click", "mouse_move"}
+            and coordinate
+        ):
             action_name = {
                 "left_click": "左键单击",
                 "double_click": "左键双击",
@@ -388,13 +422,17 @@ class WindowsDesktopController:
         if action == "type":
             text = str(arguments.get("text") or "")
             suffix = "..." if len(text) > 80 else ""
-            return f"输入文本 \"{text[:80]}{suffix}\""
+            return f'输入文本 "{text[:80]}{suffix}"'
         if action == "key":
             return f"按键 {arguments.get('keys')}"
         if action == "scroll":
             return f"滚轮 amount={arguments.get('scroll_amount')} @ {coordinate}"
         if action == "wait":
-            delay = arguments.get("seconds") if arguments.get("seconds") is not None else arguments.get("duration_ms")
+            delay = (
+                arguments.get("seconds")
+                if arguments.get("seconds") is not None
+                else arguments.get("duration_ms")
+            )
             unit = "秒" if arguments.get("seconds") is not None else "毫秒"
             return f"等待 {delay}{unit}"
         if action == "activate_window":
@@ -507,7 +545,9 @@ class WindowsDesktopController:
             self._last_execution_details = {}
             return f"已等待 {seconds:.2f} 秒。"
         if action == "activate_window":
-            window_title = str(arguments.get("window_title") or arguments.get("title") or "").strip()
+            window_title = str(
+                arguments.get("window_title") or arguments.get("title") or ""
+            ).strip()
             if not window_title:
                 raise ValueError("activate_window 操作需要提供 window_title。")
             # activate_window 不画波纹。
@@ -533,7 +573,9 @@ class WindowsDesktopController:
         user32.SetForegroundWindow(hwnd)
         time.sleep(0.25)
         current_title = self.get_foreground_window_title() or "未知窗口"
-        if self._title_contains(current_title, query) or self._titles_match(current_title, matched_title):
+        if self._title_contains(current_title, query) or self._titles_match(
+            current_title, matched_title
+        ):
             return f"已激活窗口“{current_title}”。"
         return f"已尝试激活窗口“{matched_title}”，但当前前台窗口是“{current_title}”。请根据最新截图确认。"
 
@@ -664,18 +706,24 @@ class WindowsDesktopController:
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return None
-        clipped = self._clip_rect(rect.left, rect.top, rect.right, rect.bottom, image.size[0], image.size[1])
+        clipped = self._clip_rect(
+            rect.left, rect.top, rect.right, rect.bottom, image.size[0], image.size[1]
+        )
         if clipped is None:
             return None
         left, top, right, bottom = clipped
         draw = ImageDraw.Draw(image)
-        draw.rectangle((left, top, right, bottom), fill=(236, 231, 223), outline=(176, 162, 148), width=2)
+        draw.rectangle(
+            (left, top, right, bottom), fill=(236, 231, 223), outline=(176, 162, 148), width=2
+        )
         pad = 18
         inner_left = min(right - 8, left + pad)
         inner_top = min(bottom - 8, top + pad)
         inner_right = max(inner_left + 20, right - pad)
         inner_bottom = max(inner_top + 20, bottom - pad)
-        draw.rectangle((inner_left, inner_top, inner_right, inner_bottom), outline=(196, 182, 168), width=1)
+        draw.rectangle(
+            (inner_left, inner_top, inner_right, inner_bottom), outline=(196, 182, 168), width=1
+        )
         return clipped
 
     def _move(self, x: int, y: int) -> None:
@@ -737,8 +785,12 @@ class WindowsDesktopController:
 
     def to_real_coordinate(self, x: int, y: int) -> tuple[int, int]:
         return (
-            self.translate_coordinate(x, capture_size=self.capture_width, actual_size=self.actual_width),
-            self.translate_coordinate(y, capture_size=self.capture_height, actual_size=self.actual_height),
+            self.translate_coordinate(
+                x, capture_size=self.capture_width, actual_size=self.actual_width
+            ),
+            self.translate_coordinate(
+                y, capture_size=self.capture_height, actual_size=self.actual_height
+            ),
         )
 
     def screenshot_to_physical(self, x: int, y: int) -> tuple[int, int]:
@@ -806,7 +858,9 @@ class WindowsDesktopController:
         return int(round((clamped / max(1, actual_size - 1)) * max(1, capture_size - 1)))
 
     @staticmethod
-    def _clip_rect(left: int, top: int, right: int, bottom: int, width: int, height: int) -> tuple[int, int, int, int] | None:
+    def _clip_rect(
+        left: int, top: int, right: int, bottom: int, width: int, height: int
+    ) -> tuple[int, int, int, int] | None:
         clipped_left = max(0, min(left, width))
         clipped_top = max(0, min(top, height))
         clipped_right = max(0, min(right, width))
@@ -815,16 +869,30 @@ class WindowsDesktopController:
             return None
         return clipped_left, clipped_top, clipped_right, clipped_bottom
 
-    def _capture_rect_from_actual(self, rect: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+    def _capture_rect_from_actual(
+        self, rect: tuple[int, int, int, int]
+    ) -> tuple[int, int, int, int] | None:
         left, top, right, bottom = rect
         clipped = self._clip_rect(left, top, right, bottom, self.actual_width, self.actual_height)
         if clipped is None:
             return None
         clipped_left, clipped_top, clipped_right, clipped_bottom = clipped
-        capture_left = self.to_capture_coordinate(clipped_left, actual_size=self.actual_width, capture_size=self.capture_width)
-        capture_top = self.to_capture_coordinate(clipped_top, actual_size=self.actual_height, capture_size=self.capture_height)
-        capture_right = self.to_capture_coordinate(max(clipped_left + 1, clipped_right - 1), actual_size=self.actual_width, capture_size=self.capture_width)
-        capture_bottom = self.to_capture_coordinate(max(clipped_top + 1, clipped_bottom - 1), actual_size=self.actual_height, capture_size=self.capture_height)
+        capture_left = self.to_capture_coordinate(
+            clipped_left, actual_size=self.actual_width, capture_size=self.capture_width
+        )
+        capture_top = self.to_capture_coordinate(
+            clipped_top, actual_size=self.actual_height, capture_size=self.capture_height
+        )
+        capture_right = self.to_capture_coordinate(
+            max(clipped_left + 1, clipped_right - 1),
+            actual_size=self.actual_width,
+            capture_size=self.capture_width,
+        )
+        capture_bottom = self.to_capture_coordinate(
+            max(clipped_top + 1, clipped_bottom - 1),
+            actual_size=self.actual_height,
+            capture_size=self.capture_height,
+        )
         return capture_left, capture_top, capture_right, capture_bottom
 
     def _coordinate_in_masked_region(self, x: int | None, y: int | None) -> bool:
@@ -838,7 +906,14 @@ class WindowsDesktopController:
     def _out_of_bounds_points(self, arguments: dict[str, Any]) -> list[tuple[str, tuple[int, int]]]:
         action = str(arguments.get("action") or "").strip().lower()
         fields: tuple[str, ...]
-        if action in {"left_click", "double_click", "right_click", "middle_click", "mouse_move", "scroll"}:
+        if action in {
+            "left_click",
+            "double_click",
+            "right_click",
+            "middle_click",
+            "mouse_move",
+            "scroll",
+        }:
             fields = ("coordinate",)
         elif action in {"left_click_drag", "drag"}:
             fields = ("start_coordinate", "end_coordinate")
@@ -868,7 +943,9 @@ class WindowsDesktopController:
 
     @staticmethod
     def _expected_window_title(arguments: dict[str, Any]) -> str:
-        return str(arguments.get("expected_window_title") or arguments.get("target_window_title") or "").strip()
+        return str(
+            arguments.get("expected_window_title") or arguments.get("target_window_title") or ""
+        ).strip()
 
     @staticmethod
     def _snapshot_difference_score(before_path: Path, after_path: Path) -> float | None:

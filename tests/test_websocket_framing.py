@@ -55,15 +55,17 @@ class WebSocketFramingTests(unittest.TestCase):
 
     def test_fragmentation_reassembled(self) -> None:
         """续帧(0x0)+FIN 必须拼接成完整消息（修复核心路径）。"""
-        frames = _make_frame(fin=False, opcode=0x1, payload=b"Hello ") + \
-                 _make_frame(fin=True, opcode=0x0, payload=b"World")
+        frames = _make_frame(fin=False, opcode=0x1, payload=b"Hello ") + _make_frame(
+            fin=True, opcode=0x0, payload=b"World"
+        )
         ws = self._ws(frames)
         self.assertEqual(ws._recv_message(), b"Hello World")
 
     def test_ping_gets_pong(self) -> None:
         """收到 ping(0x9) 应自动回 pong(0xA)，并继续读完后续消息。"""
-        frames = _make_frame(fin=True, opcode=0x9, payload=b"ping") + \
-                 _make_frame(fin=True, opcode=0x1, payload=b"done")
+        frames = _make_frame(fin=True, opcode=0x9, payload=b"ping") + _make_frame(
+            fin=True, opcode=0x1, payload=b"done"
+        )
         mock = _MockSocket(frames)
         ws = _SimpleWebSocket("ws://127.0.0.1:9222")
         ws.sock = mock

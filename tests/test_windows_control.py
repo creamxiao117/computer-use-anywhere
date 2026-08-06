@@ -52,13 +52,25 @@ class WindowsControlTests(unittest.TestCase):
         controller = WindowsDesktopController.__new__(WindowsDesktopController)
         controller.capture_width = 100
         controller.capture_height = 80
-        self.assertTrue(controller.has_out_of_bounds_coordinate({"action": "left_click", "coordinate": [120, 20]}))
         self.assertTrue(
             controller.has_out_of_bounds_coordinate(
-                {"action": "left_click_drag", "start_coordinate": [10, 10], "end_coordinate": [10, 90]}
+                {"action": "left_click", "coordinate": [120, 20]}
             )
         )
-        self.assertFalse(controller.has_out_of_bounds_coordinate({"action": "left_click", "coordinate": [99, 79]}))
+        self.assertTrue(
+            controller.has_out_of_bounds_coordinate(
+                {
+                    "action": "left_click_drag",
+                    "start_coordinate": [10, 10],
+                    "end_coordinate": [10, 90],
+                }
+            )
+        )
+        self.assertFalse(
+            controller.has_out_of_bounds_coordinate(
+                {"action": "left_click", "coordinate": [99, 79]}
+            )
+        )
 
     def test_enter_key_gets_longer_post_action_delay(self) -> None:
         self.assertGreaterEqual(
@@ -72,8 +84,12 @@ class WindowsControlTests(unittest.TestCase):
         self.assertEqual(WindowsDesktopController._post_action_delay("wait", {"seconds": 1}), 0.0)
 
     def test_common_key_aliases_are_supported(self) -> None:
-        self.assertEqual(WindowsDesktopController._vk_code("return"), WindowsDesktopController._vk_code("enter"))
-        self.assertEqual(WindowsDesktopController._vk_code("del"), WindowsDesktopController._vk_code("delete"))
+        self.assertEqual(
+            WindowsDesktopController._vk_code("return"), WindowsDesktopController._vk_code("enter")
+        )
+        self.assertEqual(
+            WindowsDesktopController._vk_code("del"), WindowsDesktopController._vk_code("delete")
+        )
 
     def test_is_supported_action(self) -> None:
         controller = WindowsDesktopController.__new__(WindowsDesktopController)
@@ -85,7 +101,9 @@ class WindowsControlTests(unittest.TestCase):
         controller = WindowsDesktopController.__new__(WindowsDesktopController)
         controller.settings = SessionConfig(own_window_title="Computer Use Anywhere")
         controller.get_foreground_window_title = lambda: "Computer Use Anywhere"
-        self.assertFalse(controller.is_foreground_safe_for_action({"action": "type", "text": "hello"}))
+        self.assertFalse(
+            controller.is_foreground_safe_for_action({"action": "type", "text": "hello"})
+        )
 
     def test_foreground_guard_checks_expected_window_title(self) -> None:
         controller = WindowsDesktopController.__new__(WindowsDesktopController)

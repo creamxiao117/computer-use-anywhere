@@ -17,7 +17,13 @@ from .models import (
     ProviderConfig,
     SessionConfig,
 )
-from .provider import AnthropicOfficialProvider, OpenAICompatibleProvider, SemiOfficialProvider, create_provider, guess_anthropic_computer_contract
+from .provider import (
+    AnthropicOfficialProvider,
+    OpenAICompatibleProvider,
+    SemiOfficialProvider,
+    create_provider,
+    guess_anthropic_computer_contract,
+)
 from .replay import ActionVerification, SessionReplay, verify_action_result
 from .skills import SkillRegistry, built_in_skills
 from .windows_control import WindowsDesktopController
@@ -49,9 +55,7 @@ def build_system_prompt(
             "你当前使用的是“官方体验兼容模式”：底层是 OpenAI-compatible function calling，"
             "但必须按 Anthropic computer use 的观察-动作-再观察循环工作。"
         )
-        window_control_line = (
-            "- 需要切换窗口时，必须先基于最新截图确认目标窗口可见，再执行一个安全的小动作；不要假装看见被遮挡内容。\n"
-        )
+        window_control_line = "- 需要切换窗口时，必须先基于最新截图确认目标窗口可见，再执行一个安全的小动作；不要假装看见被遮挡内容。\n"
         browser_dom_line = ""
     elif official_mode:
         protocol_line = (
@@ -237,11 +241,20 @@ class ComputerUseAgent:
         self.provider_config = provider_config
         self.provider = create_provider(provider_config)
         self.advisor_provider = self._create_advisor_provider(provider_config)
-        self.advisor_model_name = (provider_config.advisor_model or "claude-opus-4-7") if provider_config.advisor_enabled else ""
-        if isinstance(self.provider, AnthropicOfficialProvider) and not session_config.official_enhanced:
+        self.advisor_model_name = (
+            (provider_config.advisor_model or "claude-opus-4-7")
+            if provider_config.advisor_enabled
+            else ""
+        )
+        if (
+            isinstance(self.provider, AnthropicOfficialProvider)
+            and not session_config.official_enhanced
+        ):
             session_config.mask_own_window = False
         self.desktop = WindowsDesktopController(session_config)
-        self.browser_dom = BrowserDomController(session_config) if session_config.browser_dom_enabled else None
+        self.browser_dom = (
+            BrowserDomController(session_config) if session_config.browser_dom_enabled else None
+        )
         self.session_config = session_config
         self.event_callback = event_callback or (lambda event: None)
         self.stop_event = stop_event or threading.Event()
@@ -286,11 +299,15 @@ class ComputerUseAgent:
         # Append built-in skill tool schemas
         tools.extend(self.skill_registry.get_tool_schemas())
         official_mode = isinstance(self.provider, (AnthropicOfficialProvider, SemiOfficialProvider))
-        official_compatible_mode = self.provider_config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE
+        official_compatible_mode = (
+            self.provider_config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE
+        )
         semi_official_mode = self.provider_config.provider_kind == PROVIDER_SEMI_OFFICIAL
         enhanced_guards = (not official_mode) or self.session_config.official_enhanced
         if official_mode or official_compatible_mode or not self.session_config.browser_dom_enabled:
-            tools = [tool for tool in tools if tool.get("function", {}).get("name") != "browser_dom"]
+            tools = [
+                tool for tool in tools if tool.get("function", {}).get("name") != "browser_dom"
+            ]
         system_prompt = build_system_prompt(
             initial.actual_width,
             initial.actual_height,
@@ -354,8 +371,16 @@ class ComputerUseAgent:
                 self._emit("warning", final_text)
                 break
 
-            current_provider = self.advisor_provider if use_advisor_next and self.advisor_provider else self.provider
-            provider_name = f"顾问({self.advisor_model_name})" if use_advisor_next and self.advisor_provider else "主模型"
+            current_provider = (
+                self.advisor_provider
+                if use_advisor_next and self.advisor_provider
+                else self.provider
+            )
+            provider_name = (
+                f"顾问({self.advisor_model_name})"
+                if use_advisor_next and self.advisor_provider
+                else "主模型"
+            )
             # 可视化反馈：根据当前是否走顾问通道选 agent_state；status 阶段处于等待模型返回，归为 *_IDLE。
             status_agent_state = (
                 AGENT_STATE_ADVISOR_IDLE
@@ -372,12 +397,17 @@ class ComputerUseAgent:
                 },
             )
             request_started_at = time.perf_counter()
-            reply = current_provider.complete(messages, tools, system_prompt=system_prompt if official_mode else None)
+            reply = current_provider.complete(
+                messages, tools, system_prompt=system_prompt if official_mode else None
+            )
             thought_seconds = max(0.0, time.perf_counter() - request_started_at)
             if reply.assistant_message:
                 messages.append(reply.assistant_message)
             if use_advisor_next and self.advisor_provider:
-                self._emit("analysis", f"顾问模型({self.advisor_model_name}) 介入处理上一步失败。思考 {thought_seconds:.1f} 秒。")
+                self._emit(
+                    "analysis",
+                    f"顾问模型({self.advisor_model_name}) 介入处理上一步失败。思考 {thought_seconds:.1f} 秒。",
+                )
                 use_advisor_next = False
                 advisor_step_count += 1
 
@@ -414,7 +444,9 @@ class ComputerUseAgent:
                     before_snapshot=before_snapshot,
                     after_snapshot=snapshot,
                     model_text=reply.text,
-                    public_reasoning=self._public_reasoning(reply.text, reply.reasoning_summary, call.arguments),
+                    public_reasoning=self._public_reasoning(
+                        reply.text, reply.reasoning_summary, call.arguments
+                    ),
                 )
                 latest_snapshot = snapshot
                 messages.extend(
@@ -429,7 +461,11 @@ class ComputerUseAgent:
             if call.name not in {"computer"} and self.skill_registry._skills.get(call.name):
                 before_snapshot = latest_snapshot
                 result = self.skill_registry.execute(call.name, call.arguments)
-                result_text = json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
+                result_text = (
+                    json.dumps(result, ensure_ascii=False)
+                    if isinstance(result, dict)
+                    else str(result)
+                )
                 snapshot = self.desktop.capture_snapshot(f"skill_{call.name}")
                 latest_snapshot = snapshot
                 self._emit("tool", f"Skill {call.name} 结果：{result_text[:200]}")
@@ -441,7 +477,9 @@ class ComputerUseAgent:
                     before_snapshot=before_snapshot,
                     after_snapshot=snapshot,
                     model_text=reply.text,
-                    public_reasoning=self._public_reasoning(reply.text, reply.reasoning_summary, call.arguments),
+                    public_reasoning=self._public_reasoning(
+                        reply.text, reply.reasoning_summary, call.arguments
+                    ),
                 )
                 messages.extend(
                     self.provider.build_tool_result_messages(
@@ -457,7 +495,9 @@ class ComputerUseAgent:
 
             arguments = normalize_computer_action(call.arguments)
             before_decision_snapshot = latest_snapshot
-            public_reasoning = self._public_reasoning(reply.text, reply.reasoning_summary, arguments)
+            public_reasoning = self._public_reasoning(
+                reply.text, reply.reasoning_summary, arguments
+            )
             if should_apply_browser_dom_first_guard(
                 task=task,
                 official_mode=official_mode,
@@ -487,7 +527,9 @@ class ComputerUseAgent:
                     after_snapshot=snapshot,
                     model_text=reply.text,
                     public_reasoning=public_reasoning,
-                    verification=ActionVerification("warn", "网页任务 DOM 优先守卫拦截了第一次截图点击/输入。"),
+                    verification=ActionVerification(
+                        "warn", "网页任务 DOM 优先守卫拦截了第一次截图点击/输入。"
+                    ),
                 )
                 messages.extend(
                     self.provider.build_tool_result_messages(
@@ -561,7 +603,9 @@ class ComputerUseAgent:
                     after_snapshot=snapshot,
                     model_text=reply.text,
                     public_reasoning=public_reasoning,
-                    verification=ActionVerification("warn", "坐标超出当前截图范围，已被安全阀拦截。"),
+                    verification=ActionVerification(
+                        "warn", "坐标超出当前截图范围，已被安全阀拦截。"
+                    ),
                 )
                 messages.extend(
                     self.provider.build_tool_result_messages(
@@ -588,7 +632,9 @@ class ComputerUseAgent:
                     after_snapshot=snapshot,
                     model_text=reply.text,
                     public_reasoning=public_reasoning,
-                    verification=ActionVerification("warn", "目标坐标位于代理窗口遮挡区域，已被安全阀拦截。"),
+                    verification=ActionVerification(
+                        "warn", "目标坐标位于代理窗口遮挡区域，已被安全阀拦截。"
+                    ),
                 )
                 messages.extend(
                     self.provider.build_tool_result_messages(
@@ -602,7 +648,9 @@ class ComputerUseAgent:
                 continue
 
             pre_execution_notes: list[str] = []
-            auto_focus_message = self.desktop.ensure_expected_window_foreground(arguments) if enhanced_guards else ""
+            auto_focus_message = (
+                self.desktop.ensure_expected_window_foreground(arguments) if enhanced_guards else ""
+            )
             if auto_focus_message:
                 note = f"自动前台校正：{auto_focus_message}"
                 pre_execution_notes.append(note)
@@ -622,7 +670,9 @@ class ComputerUseAgent:
                     after_snapshot=snapshot,
                     model_text=reply.text,
                     public_reasoning=public_reasoning,
-                    verification=ActionVerification("warn", "输入类动作的前台窗口不安全，已被安全阀拦截。"),
+                    verification=ActionVerification(
+                        "warn", "输入类动作的前台窗口不安全，已被安全阀拦截。"
+                    ),
                 )
                 messages.extend(
                     self.provider.build_tool_result_messages(
@@ -635,12 +685,18 @@ class ComputerUseAgent:
                 use_advisor_next = True
                 continue
 
-            if self.session_config.confirm_actions and arguments.get("action") not in {"screenshot", "wait", "activate_window"}:
+            if self.session_config.confirm_actions and arguments.get("action") not in {
+                "screenshot",
+                "wait",
+                "activate_window",
+            }:
                 approved = self._confirm(action_summary)
                 if not approved:
                     snapshot = self.desktop.capture_snapshot("rejected")
                     latest_snapshot = snapshot
-                    tool_text = f"用户拒绝了这次操作：{action_summary}。请基于最新截图重新判断下一步。"
+                    tool_text = (
+                        f"用户拒绝了这次操作：{action_summary}。请基于最新截图重新判断下一步。"
+                    )
                     self._emit("warning", tool_text, snapshot_path=snapshot.path)
                     self._record_replay_step(
                         step=step,
@@ -735,25 +791,34 @@ class ComputerUseAgent:
             # RegionFocus 钩子: 点击类动作 + 画面几乎无变化 + 有合法坐标 时,
             # 在 result.snapshot 上画红框 + 右下角拼放大区域,让下一轮 (顾问) 模型
             # 看到"我应该重新看哪儿"。其他场景沿用普通 snapshot,不增加开销。
-            click_xy_for_focus = self._extract_click_coordinate(arguments) if verification.status == "warn" and use_advisor_next else None
+            click_xy_for_focus = (
+                self._extract_click_coordinate(arguments)
+                if verification.status == "warn" and use_advisor_next
+                else None
+            )
             action_for_focus = str(arguments.get("action") or "").strip().lower()
             region_focus_enabled = (
                 click_xy_for_focus is not None
-                and action_for_focus in {"left_click", "click", "double_click", "right_click", "middle_click"}
+                and action_for_focus
+                in {"left_click", "click", "double_click", "right_click", "middle_click"}
                 and ("几乎没有变化" in verification.message or "变化很小" in verification.message)
             )
             outbound_snapshot = result.snapshot
             region_focus_hint = ""
             if region_focus_enabled:
                 try:
-                    outbound_snapshot = self.desktop.make_region_focus_snapshot(result.snapshot, click_xy_for_focus)
+                    outbound_snapshot = self.desktop.make_region_focus_snapshot(
+                        result.snapshot, click_xy_for_focus
+                    )
                     region_focus_hint = (
                         f"\n[RegionFocus 提示] 上次点击 ({click_xy_for_focus[0]},{click_xy_for_focus[1]}) 后画面几乎无变化。"
                         f"附图右下角是该点周围 ±{96}px 的放大区域,红框/十字标出了上次点击位置。"
                         f"**请放大看清楚:那个位置真的有可点击元素吗?** 如果没有,请在放大区域内重新挑选正确的目标像素坐标 (注意:坐标仍按全局截图尺寸给)。"
                         f"如果该位置确有目标但 UI 反应慢,改用 wait()。"
                     )
-                    self._emit("analysis", "已启用 RegionFocus:在截图右下角拼了点击点附近的放大区域。")
+                    self._emit(
+                        "analysis", "已启用 RegionFocus:在截图右下角拼了点击点附近的放大区域。"
+                    )
                 except Exception:
                     outbound_snapshot = result.snapshot
                     region_focus_hint = ""
@@ -876,7 +941,9 @@ class ComputerUseAgent:
         compact_titles = "；".join(titles[:12])
         return f"当前前台窗口标题：{foreground}\n当前可见窗口标题：{compact_titles}"
 
-    def _browser_dom_state_text(self, official_mode: bool, *, official_compatible_mode: bool = False) -> str:
+    def _browser_dom_state_text(
+        self, official_mode: bool, *, official_compatible_mode: bool = False
+    ) -> str:
         if official_mode or official_compatible_mode:
             return "浏览器 DOM 工具：官方 Anthropic 模式不启用，保持官方 computer 协议。"
         if self.browser_dom is None:
@@ -919,7 +986,9 @@ class ComputerUseAgent:
         return "\n".join(parts)
 
     @staticmethod
-    def _public_reasoning(visible_text: str, official_reasoning: str, arguments: dict[str, Any]) -> str:
+    def _public_reasoning(
+        visible_text: str, official_reasoning: str, arguments: dict[str, Any]
+    ) -> str:
         visible = (visible_text or "").strip()
         if visible:
             return visible

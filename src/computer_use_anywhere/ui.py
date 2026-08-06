@@ -139,7 +139,11 @@ class App:
         )
         style.map(
             "Accent.TButton",
-            background=[("active", ACCENT_ACTIVE), ("pressed", ACCENT_ACTIVE), ("disabled", "#D8CBBE")],
+            background=[
+                ("active", ACCENT_ACTIVE),
+                ("pressed", ACCENT_ACTIVE),
+                ("disabled", "#D8CBBE"),
+            ],
             foreground=[("disabled", "#F6F2EA")],
         )
 
@@ -232,14 +236,20 @@ class App:
         scroll_shell.grid_rowconfigure(0, weight=1)
         scroll_shell.grid_columnconfigure(0, weight=1)
 
-        self.sidebar_canvas = tk.Canvas(scroll_shell, bg=BG, highlightthickness=0, bd=0, relief="flat")
-        sidebar_scrollbar = ttk.Scrollbar(scroll_shell, orient="vertical", command=self.sidebar_canvas.yview)
+        self.sidebar_canvas = tk.Canvas(
+            scroll_shell, bg=BG, highlightthickness=0, bd=0, relief="flat"
+        )
+        sidebar_scrollbar = ttk.Scrollbar(
+            scroll_shell, orient="vertical", command=self.sidebar_canvas.yview
+        )
         self.sidebar_canvas.configure(yscrollcommand=sidebar_scrollbar.set)
         self.sidebar_canvas.grid(row=0, column=0, sticky="nsew")
         sidebar_scrollbar.grid(row=0, column=1, sticky="ns")
 
         self.sidebar_content = tk.Frame(self.sidebar_canvas, bg=BG)
-        self.sidebar_window = self.sidebar_canvas.create_window((0, 0), window=self.sidebar_content, anchor="nw")
+        self.sidebar_window = self.sidebar_canvas.create_window(
+            (0, 0), window=self.sidebar_content, anchor="nw"
+        )
         self.sidebar_content.bind("<Configure>", self._on_sidebar_content_configure)
         self.sidebar_canvas.bind("<Configure>", self._on_sidebar_canvas_configure)
         self.sidebar_canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
@@ -332,9 +342,19 @@ class App:
             variable=self.enable_thinking_var,
             style="Soft.TCheckbutton",
         ).pack(anchor="w", pady=(4, 4))
-        tk.Label(self.official_card, text="思考强度", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
-        ttk.Combobox(self.official_card, textvariable=self.thinking_intensity_var, values=["medium", "high"], state="readonly", width=18).pack(anchor="w", pady=(0, 10))
-        self._add_entry(self.official_card, "thinking token 预算", self.thinking_budget_var, width=18)
+        tk.Label(
+            self.official_card, text="思考强度", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Combobox(
+            self.official_card,
+            textvariable=self.thinking_intensity_var,
+            values=["medium", "high"],
+            state="readonly",
+            width=18,
+        ).pack(anchor="w", pady=(0, 10))
+        self._add_entry(
+            self.official_card, "thinking token 预算", self.thinking_budget_var, width=18
+        )
         ttk.Checkbutton(
             self.official_card,
             text="启用 compact-2026-01-12 长对话压缩",
@@ -363,19 +383,56 @@ class App:
         self.browser_dom_first_var = tk.BooleanVar(value=True)
         self.browser_debug_host_var = tk.StringVar()
         self.browser_debug_port_var = tk.StringVar()
-        tk.Label(runtime_card, text="目标分辨率", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
-        resolution_combo = ttk.Combobox(runtime_card, textvariable=self.target_resolution_var, values=["1280x720", "1920x1080", "max_api_fit", "scale"], state="readonly", width=18)
+        tk.Label(
+            runtime_card, text="目标分辨率", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w", pady=(0, 4))
+        resolution_combo = ttk.Combobox(
+            runtime_card,
+            textvariable=self.target_resolution_var,
+            values=["1280x720", "1920x1080", "max_api_fit", "scale"],
+            state="readonly",
+            width=18,
+        )
         resolution_combo.pack(anchor="w", pady=(0, 10))
-        tk.Label(runtime_card, text="模型家族（影响 API 像素限制）", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
-        family_combo = ttk.Combobox(runtime_card, textvariable=self.model_family_hint_var, values=["auto", "claude_4_6", "opus_4_7"], state="readonly", width=18)
+        tk.Label(
+            runtime_card,
+            text="模型家族（影响 API 像素限制）",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(0, 4))
+        family_combo = ttk.Combobox(
+            runtime_card,
+            textvariable=self.model_family_hint_var,
+            values=["auto", "claude_4_6", "opus_4_7"],
+            state="readonly",
+            width=18,
+        )
         family_combo.pack(anchor="w", pady=(0, 10))
         self._add_entry(runtime_card, "截图缩放(仅scale模式)", self.scale_var, width=18)
         self._add_entry(runtime_card, "JPEG 质量", self.jpeg_quality_var, width=18)
         self._add_entry(runtime_card, "最大步数", self.max_steps_var, width=18)
-        ttk.Checkbutton(runtime_card, text="逐步确认每次操作", variable=self.confirm_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(4, 2))
-        ttk.Checkbutton(runtime_card, text="运行时自动隐藏本窗口（推荐）", variable=self.hide_window_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 2))
-        ttk.Checkbutton(runtime_card, text="启用可视化反馈（呼吸灯 + 点击波纹 + 悬浮 HUD，仅隐藏主窗口时启用）", variable=self.visual_feedback_enabled_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 4))
-        tk.Label(runtime_card, text="可视化色彩主题", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        ttk.Checkbutton(
+            runtime_card,
+            text="逐步确认每次操作",
+            variable=self.confirm_var,
+            style="Soft.TCheckbutton",
+        ).pack(anchor="w", pady=(4, 2))
+        ttk.Checkbutton(
+            runtime_card,
+            text="运行时自动隐藏本窗口（推荐）",
+            variable=self.hide_window_var,
+            style="Soft.TCheckbutton",
+        ).pack(anchor="w", pady=(2, 2))
+        ttk.Checkbutton(
+            runtime_card,
+            text="启用可视化反馈（呼吸灯 + 点击波纹 + 悬浮 HUD，仅隐藏主窗口时启用）",
+            variable=self.visual_feedback_enabled_var,
+            style="Soft.TCheckbutton",
+        ).pack(anchor="w", pady=(2, 4))
+        tk.Label(
+            runtime_card, text="可视化色彩主题", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w", pady=(0, 4))
         ttk.Combobox(
             runtime_card,
             textvariable=self.color_scheme_var,
@@ -383,14 +440,34 @@ class App:
             state="readonly",
             width=18,
         ).pack(anchor="w", pady=(0, 10))
-        ttk.Checkbutton(runtime_card, text="启用浏览器 DOM 工具（兼容模式）", variable=self.browser_dom_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 2))
-        ttk.Checkbutton(runtime_card, text="网页任务优先使用 DOM（推荐）", variable=self.browser_dom_first_var, style="Soft.TCheckbutton").pack(anchor="w", pady=(2, 2))
+        ttk.Checkbutton(
+            runtime_card,
+            text="启用浏览器 DOM 工具（兼容模式）",
+            variable=self.browser_dom_var,
+            style="Soft.TCheckbutton",
+        ).pack(anchor="w", pady=(2, 2))
+        ttk.Checkbutton(
+            runtime_card,
+            text="网页任务优先使用 DOM（推荐）",
+            variable=self.browser_dom_first_var,
+            style="Soft.TCheckbutton",
+        ).pack(anchor="w", pady=(2, 2))
         self._add_entry(runtime_card, "浏览器调试地址", self.browser_debug_host_var, width=18)
         self._add_entry(runtime_card, "浏览器调试端口", self.browser_debug_port_var, width=18)
         browser_actions = tk.Frame(runtime_card, bg=PANEL)
         browser_actions.pack(fill="x", pady=(0, 10))
-        ttk.Button(browser_actions, text="启动调试 Edge", command=self.on_launch_debug_edge, style="Soft.TButton").pack(side="left")
-        ttk.Button(browser_actions, text="本机自检", command=self.on_run_local_diagnostics, style="Soft.TButton").pack(side="left", padx=(8, 0))
+        ttk.Button(
+            browser_actions,
+            text="启动调试 Edge",
+            command=self.on_launch_debug_edge,
+            style="Soft.TButton",
+        ).pack(side="left")
+        ttk.Button(
+            browser_actions,
+            text="本机自检",
+            command=self.on_run_local_diagnostics,
+            style="Soft.TButton",
+        ).pack(side="left", padx=(8, 0))
         tk.Label(
             runtime_card,
             text="浏览器 DOM 需要 Edge/Chrome 用 --remote-debugging-port=9222 启动；不可用时会自动回退到截图操作。",
@@ -437,9 +514,19 @@ class App:
 
         actions = tk.Frame(task_card, bg=PANEL)
         actions.pack(fill="x")
-        self.start_button = ttk.Button(actions, text="开始运行", command=self.on_start, style="Accent.TButton")
-        self.stop_button = ttk.Button(actions, text="停止", command=self.on_stop, style="Soft.TButton", state="disabled")
-        self.open_session_button = ttk.Button(actions, text="打开会话目录", command=self.on_open_session, style="Soft.TButton", state="disabled")
+        self.start_button = ttk.Button(
+            actions, text="开始运行", command=self.on_start, style="Accent.TButton"
+        )
+        self.stop_button = ttk.Button(
+            actions, text="停止", command=self.on_stop, style="Soft.TButton", state="disabled"
+        )
+        self.open_session_button = ttk.Button(
+            actions,
+            text="打开会话目录",
+            command=self.on_open_session,
+            style="Soft.TButton",
+            state="disabled",
+        )
         self.start_button.pack(side="left")
         self.stop_button.pack(side="left", padx=(8, 0))
         self.open_session_button.pack(side="left", padx=(8, 0))
@@ -451,13 +538,17 @@ class App:
         main_shell.grid_columnconfigure(0, weight=1)
 
         self.main_canvas = tk.Canvas(main_shell, bg=BG, highlightthickness=0, bd=0, relief="flat")
-        main_scrollbar = ttk.Scrollbar(main_shell, orient="vertical", command=self.main_canvas.yview)
+        main_scrollbar = ttk.Scrollbar(
+            main_shell, orient="vertical", command=self.main_canvas.yview
+        )
         self.main_canvas.configure(yscrollcommand=main_scrollbar.set)
         self.main_canvas.grid(row=0, column=0, sticky="nsew")
         main_scrollbar.grid(row=0, column=1, sticky="ns")
 
         self.main_content = tk.Frame(self.main_canvas, bg=BG)
-        self.main_window = self.main_canvas.create_window((0, 0), window=self.main_content, anchor="nw")
+        self.main_window = self.main_canvas.create_window(
+            (0, 0), window=self.main_content, anchor="nw"
+        )
         self.main_content.bind("<Configure>", self._on_main_content_configure)
         self.main_canvas.bind("<Configure>", self._on_main_canvas_configure)
 
@@ -470,11 +561,25 @@ class App:
 
         insight = self._card(main, bg=PANEL_ALT, pady=14)
         insight.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        tk.Label(insight, text="运行状态", bg=PANEL_ALT, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w")
+        tk.Label(
+            insight, text="运行状态", bg=PANEL_ALT, fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w")
         self.status_var = tk.StringVar(value="空闲")
-        tk.Label(insight, textvariable=self.status_var, bg=PANEL_ALT, fg=TEXT, font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", pady=(3, 8))
+        tk.Label(
+            insight,
+            textvariable=self.status_var,
+            bg=PANEL_ALT,
+            fg=TEXT,
+            font=("Microsoft YaHei UI", 15, "bold"),
+        ).pack(anchor="w", pady=(3, 8))
         self.meta_var = tk.StringVar(value="等待任务启动")
-        tk.Label(insight, textvariable=self.meta_var, bg=PANEL_ALT, fg=MUTED, font=("Microsoft YaHei UI", 10)).pack(anchor="w")
+        tk.Label(
+            insight,
+            textvariable=self.meta_var,
+            bg=PANEL_ALT,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 10),
+        ).pack(anchor="w")
 
         analysis_card = self._card(main)
         analysis_card.grid(row=1, column=0, sticky="ew", pady=(0, 12))
@@ -528,9 +633,17 @@ class App:
         top.grid(row=0, column=0, sticky="ew")
         top.grid_columnconfigure(0, weight=1)
         self._card_title(top, "实时截图", pack=False).grid(row=0, column=0, sticky="w")
-        tk.Label(top, text="模型的坐标判断会基于这张缩放后的截图", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).grid(row=0, column=1, sticky="e")
+        tk.Label(
+            top,
+            text="模型的坐标判断会基于这张缩放后的截图",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 9),
+        ).grid(row=0, column=1, sticky="e")
 
-        image_shell = tk.Frame(preview_card, bg="#F3ECE1", highlightbackground=BORDER, highlightthickness=1, bd=0)
+        image_shell = tk.Frame(
+            preview_card, bg="#F3ECE1", highlightbackground=BORDER, highlightthickness=1, bd=0
+        )
         image_shell.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
         image_shell.grid_rowconfigure(0, weight=1)
         image_shell.grid_columnconfigure(0, weight=1)
@@ -548,7 +661,9 @@ class App:
         log_card = self._card(main)
         log_card.grid(row=3, column=0, sticky="ew")
         self._card_title(log_card, "事件日志")
-        log_shell = tk.Frame(log_card, bg=LOG_BG, highlightbackground=BORDER, highlightthickness=1, bd=0)
+        log_shell = tk.Frame(
+            log_card, bg=LOG_BG, highlightbackground=BORDER, highlightthickness=1, bd=0
+        )
         log_shell.pack(fill="both", expand=True, pady=(2, 0))
         log_shell.grid_columnconfigure(0, weight=1)
         log_shell.grid_rowconfigure(0, weight=1)
@@ -582,36 +697,75 @@ class App:
         row1.grid_columnconfigure(0, weight=1)
         row1.grid_columnconfigure(1, weight=1)
         self._create_mode_option(
-            row1, 0,
-            PROVIDER_OPENAI_COMPATIBLE, "兼容模式", "适合中转站",
+            row1,
+            0,
+            PROVIDER_OPENAI_COMPATIBLE,
+            "兼容模式",
+            "适合中转站",
         )
         self._create_mode_option(
-            row1, 1,
-            PROVIDER_OFFICIAL_COMPATIBLE, "官方体验", "中转站可用",
+            row1,
+            1,
+            PROVIDER_OFFICIAL_COMPATIBLE,
+            "官方体验",
+            "中转站可用",
         )
         row2 = tk.Frame(outer, bg=PANEL_ALT)
         row2.pack(fill="x")
         row2.grid_columnconfigure(0, weight=1)
         row2.grid_columnconfigure(1, weight=1)
         self._create_mode_option(
-            row2, 0,
-            PROVIDER_SEMI_OFFICIAL, "半官方模式 v3", "中转站+Claude协议",
+            row2,
+            0,
+            PROVIDER_SEMI_OFFICIAL,
+            "半官方模式 v3",
+            "中转站+Claude协议",
         )
         self._create_mode_option(
-            row2, 1,
-            PROVIDER_ANTHROPIC_OFFICIAL, "官方模式", "Anthropic 直连",
+            row2,
+            1,
+            PROVIDER_ANTHROPIC_OFFICIAL,
+            "官方模式",
+            "Anthropic 直连",
         )
 
-    def _create_mode_option(self, parent: tk.Widget, column: int, kind: str, title: str, subtitle: str) -> None:
-        card = tk.Frame(parent, bg=PANEL, highlightbackground=BORDER, highlightthickness=1, bd=0, padx=12, pady=10, cursor="hand2")
-        card.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 6, 0 if column == 2 else 6))
+    def _create_mode_option(
+        self, parent: tk.Widget, column: int, kind: str, title: str, subtitle: str
+    ) -> None:
+        card = tk.Frame(
+            parent,
+            bg=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=12,
+            pady=10,
+            cursor="hand2",
+        )
+        card.grid(
+            row=0,
+            column=column,
+            sticky="ew",
+            padx=(0 if column == 0 else 6, 0 if column == 2 else 6),
+        )
         card.grid_columnconfigure(1, weight=1)
 
-        circle = tk.Canvas(card, width=18, height=18, bg=PANEL, highlightthickness=0, bd=0, cursor="hand2")
+        circle = tk.Canvas(
+            card, width=18, height=18, bg=PANEL, highlightthickness=0, bd=0, cursor="hand2"
+        )
         circle.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 10))
-        label = tk.Label(card, text=title, bg=PANEL, fg=TEXT, font=("Microsoft YaHei UI", 10, "bold"), cursor="hand2")
+        label = tk.Label(
+            card,
+            text=title,
+            bg=PANEL,
+            fg=TEXT,
+            font=("Microsoft YaHei UI", 10, "bold"),
+            cursor="hand2",
+        )
         label.grid(row=0, column=1, sticky="w")
-        hint = tk.Label(card, text=subtitle, bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9), cursor="hand2")
+        hint = tk.Label(
+            card, text=subtitle, bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9), cursor="hand2"
+        )
         hint.grid(row=1, column=1, sticky="w")
 
         for widget in (card, circle, label, hint):
@@ -627,41 +781,69 @@ class App:
         selected = self.provider_kind_var.get()
         for kind, widgets in self.mode_widgets.items():
             active = kind == selected
-            official_tone = kind in {PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE, PROVIDER_SEMI_OFFICIAL}
+            official_tone = kind in {
+                PROVIDER_ANTHROPIC_OFFICIAL,
+                PROVIDER_OFFICIAL_COMPATIBLE,
+                PROVIDER_SEMI_OFFICIAL,
+            }
             semi_official = kind == PROVIDER_SEMI_OFFICIAL
-            card_bg = OFFICIAL_SOFT if active and official_tone else (ACCENT_SOFT if active else PANEL)
-            card_fg = "#6A4BC4" if active and semi_official else (OFFICIAL if active and official_tone else (ACCENT_ACTIVE if active else TEXT))
+            card_bg = (
+                OFFICIAL_SOFT if active and official_tone else (ACCENT_SOFT if active else PANEL)
+            )
+            card_fg = (
+                "#6A4BC4"
+                if active and semi_official
+                else (OFFICIAL if active and official_tone else (ACCENT_ACTIVE if active else TEXT))
+            )
             card = widgets["card"]
             circle = widgets["circle"]
             label = widgets["label"]
             hint = widgets["hint"]
-            card_border = ("#6A4BC4" if active and semi_official else OFFICIAL if active and official_tone else ACCENT if active else BORDER)
+            card_border = (
+                "#6A4BC4"
+                if active and semi_official
+                else OFFICIAL
+                if active and official_tone
+                else ACCENT
+                if active
+                else BORDER
+            )
             card.configure(bg=card_bg, highlightbackground=card_border)
             label.configure(bg=card_bg, fg=card_fg)
             hint.configure(bg=card_bg, fg=MUTED)
             circle.configure(bg=card_bg)
             circle.delete("all")
             outline = "#6A4BC4" if semi_official else (OFFICIAL if official_tone else ACCENT)
-            circle.create_oval(2, 2, 16, 16, outline=outline, width=2, fill=outline if active else card_bg)
+            circle.create_oval(
+                2, 2, 16, 16, outline=outline, width=2, fill=outline if active else card_bg
+            )
 
         if selected == PROVIDER_ANTHROPIC_OFFICIAL:
             self.hero_title_var.set("Anthropic 官方 computer use")
-            self.hero_body_var.set("直接走 Anthropic Messages API、官方 beta 头和 computer 工具；可切换纯原生或增强原生。适合直连 api.anthropic.com。")
+            self.hero_body_var.set(
+                "直接走 Anthropic Messages API、官方 beta 头和 computer 工具；可切换纯原生或增强原生。适合直连 api.anthropic.com。"
+            )
             self.subtitle_var.set("四模式：当前为 Anthropic 官方模式")
             self.official_card.pack(fill="x", pady=(0, 12), before=self.advanced_card)
         elif selected == PROVIDER_SEMI_OFFICIAL:
             self.hero_title_var.set("半官方模式 v3 — 中转站 + Claude 原生协议")
-            self.hero_body_var.set("请求体用 Anthropic Messages API（含 computer_20251124），认证用 Bearer Token。中转站只要透传到 /messages 就能最大化 Claude 模型效果。beta 头可选填。")
+            self.hero_body_var.set(
+                "请求体用 Anthropic Messages API（含 computer_20251124），认证用 Bearer Token。中转站只要透传到 /messages 就能最大化 Claude 模型效果。beta 头可选填。"
+            )
             self.subtitle_var.set("四模式：当前为半官方模式（中转站 + Claude 协议）")
             self.official_card.pack(fill="x", pady=(0, 12), before=self.advanced_card)
         elif selected == PROVIDER_OFFICIAL_COMPATIBLE:
             self.hero_title_var.set("官方体验兼容模式")
-            self.hero_body_var.set("底层走 OpenAI-compatible 中转站，但按官方 computer use 的单 computer 工具循环执行。")
+            self.hero_body_var.set(
+                "底层走 OpenAI-compatible 中转站，但按官方 computer use 的单 computer 工具循环执行。"
+            )
             self.subtitle_var.set("四模式：当前为官方体验兼容模式")
             self.official_card.pack_forget()
         else:
             self.hero_title_var.set("兼容中转站的代理式 computer use")
-            self.hero_body_var.set("这套模式保留中转站兼容，同时增加网页 DOM 工具。网页任务先读 DOM，桌面任务再走截图和本地执行器。")
+            self.hero_body_var.set(
+                "这套模式保留中转站兼容，同时增加网页 DOM 工具。网页任务先读 DOM，桌面任务再走截图和本地执行器。"
+            )
             self.subtitle_var.set("四模式：当前为兼容中转站模式")
             self.official_card.pack_forget()
         self._refresh_contract_hint()
@@ -765,7 +947,9 @@ class App:
 
     def _refresh_contract_hint(self) -> None:
         beta, tool_type = guess_anthropic_computer_contract(self.model_var.get().strip())
-        self.contract_hint_var.set(f"按当前模型建议自动填充：anthropic-beta={beta}，tool={tool_type}")
+        self.contract_hint_var.set(
+            f"按当前模型建议自动填充：anthropic-beta={beta}，tool={tool_type}"
+        )
         if self.provider_kind_var.get() in {PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_SEMI_OFFICIAL}:
             if not self.anthropic_version_var.get().strip():
                 self.anthropic_version_var.set(ANTHROPIC_VERSION_DEFAULT)
@@ -775,15 +959,31 @@ class App:
                 self.anthropic_tool_type_var.set(tool_type)
 
     def _card(self, parent: tk.Widget, *, bg: str = PANEL, pady: int = 14) -> tk.Frame:
-        return tk.Frame(parent, bg=bg, highlightbackground=BORDER, highlightthickness=1, bd=0, padx=16, pady=pady)
+        return tk.Frame(
+            parent,
+            bg=bg,
+            highlightbackground=BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=16,
+            pady=pady,
+        )
 
     def _card_title(self, parent: tk.Widget, text: str, *, pack: bool = True) -> tk.Label:
-        label = tk.Label(parent, text=text, bg=parent.cget("bg"), fg=TEXT, font=("Microsoft YaHei UI", 11, "bold"))
+        label = tk.Label(
+            parent,
+            text=text,
+            bg=parent.cget("bg"),
+            fg=TEXT,
+            font=("Microsoft YaHei UI", 11, "bold"),
+        )
         if pack:
             label.pack(anchor="w", pady=(0, 10))
         return label
 
-    def _styled_entry(self, parent: tk.Widget, variable: tk.StringVar, *, show: str | None = None, width: int = 40) -> tk.Entry:
+    def _styled_entry(
+        self, parent: tk.Widget, variable: tk.StringVar, *, show: str | None = None, width: int = 40
+    ) -> tk.Entry:
         return tk.Entry(
             parent,
             textvariable=variable,
@@ -818,8 +1018,19 @@ class App:
             pady=10,
         )
 
-    def _add_entry(self, parent: tk.Widget, label: str, variable: tk.StringVar, *, show: str | None = None, width: int = 40, helper: str = "") -> tk.Entry:
-        tk.Label(parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+    def _add_entry(
+        self,
+        parent: tk.Widget,
+        label: str,
+        variable: tk.StringVar,
+        *,
+        show: str | None = None,
+        width: int = 40,
+        helper: str = "",
+    ) -> tk.Entry:
+        tk.Label(
+            parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w", pady=(0, 4))
         entry = self._styled_entry(parent, variable, show=show, width=width)
         if helper:
             entry.pack(fill="x", pady=(0, 2), ipady=8)
@@ -837,7 +1048,9 @@ class App:
         return entry
 
     def _add_text(self, parent: tk.Widget, label: str, *, lines: int) -> tk.Text:
-        tk.Label(parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        tk.Label(
+            parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w", pady=(0, 4))
         widget = self._styled_text(parent, height=lines)
         widget.pack(fill="x", pady=(0, 10))
         return widget
@@ -853,7 +1066,9 @@ class App:
         button_tooltip: str = "",
         show: str | None = None,
     ) -> tuple[tk.Entry, tk.Button]:
-        tk.Label(parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+        tk.Label(
+            parent, text=label, bg=parent.cget("bg"), fg=MUTED, font=("Microsoft YaHei UI", 9)
+        ).pack(anchor="w", pady=(0, 4))
         row = tk.Frame(parent, bg=parent.cget("bg"))
         row.pack(fill="x", pady=(0, 10))
         entry = self._styled_entry(parent, variable, show=show, width=10)
@@ -892,9 +1107,13 @@ class App:
             tw.wm_overrideredirect(True)
             tw.wm_geometry(f"+{x}+{y}")
             tk.Label(
-                tw, text=text, bg="#2D261F", fg="#F6F2EA",
+                tw,
+                text=text,
+                bg="#2D261F",
+                fg="#F6F2EA",
                 font=("Microsoft YaHei UI", 9),
-                padx=8, pady=4,
+                padx=8,
+                pady=4,
             ).pack()
             tip["window"] = tw
 
@@ -922,7 +1141,9 @@ class App:
 
     def _configure_reasoning_tags(self) -> None:
         self.reasoning_text.tag_configure("label", foreground=MUTED)
-        self.reasoning_text.tag_configure("title", foreground=MUTED, font=("Microsoft YaHei UI", 9, "bold"))
+        self.reasoning_text.tag_configure(
+            "title", foreground=MUTED, font=("Microsoft YaHei UI", 9, "bold")
+        )
         self.reasoning_text.tag_configure("公开思考", foreground=TEXT, spacing3=8)
         self.reasoning_text.tag_configure("派生说明", foreground=ACCENT_ACTIVE, spacing3=8)
 
@@ -953,11 +1174,29 @@ class App:
             current = getattr(current, "master", None)
 
     def _apply_settings(self) -> None:
-        self.provider_kind_var.set(str(self.settings.get("provider_kind") or PROVIDER_OPENAI_COMPATIBLE))
-        self.base_url_var.set(str(self.settings.get("base_url") or os.environ.get("ANTHROPIC_BASE_URL") or "https://openrouter.ai/api"))
-        self.model_var.set(str(self.settings.get("model") or os.environ.get("COMPUTER_USE_MODEL") or "anthropic/claude-sonnet-4.6"))
-        self.api_key_var.set(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY") or "")
-        self.anthropic_version_var.set(str(self.settings.get("anthropic_version") or ANTHROPIC_VERSION_DEFAULT))
+        self.provider_kind_var.set(
+            str(self.settings.get("provider_kind") or PROVIDER_OPENAI_COMPATIBLE)
+        )
+        self.base_url_var.set(
+            str(
+                self.settings.get("base_url")
+                or os.environ.get("ANTHROPIC_BASE_URL")
+                or "https://openrouter.ai/api"
+            )
+        )
+        self.model_var.set(
+            str(
+                self.settings.get("model")
+                or os.environ.get("COMPUTER_USE_MODEL")
+                or "anthropic/claude-sonnet-4.6"
+            )
+        )
+        self.api_key_var.set(
+            os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+        )
+        self.anthropic_version_var.set(
+            str(self.settings.get("anthropic_version") or ANTHROPIC_VERSION_DEFAULT)
+        )
         self.anthropic_beta_var.set(str(self.settings.get("anthropic_beta") or ""))
         self.anthropic_tool_type_var.set(str(self.settings.get("anthropic_tool_type") or ""))
         self.official_enhanced_var.set(bool(self.settings.get("official_enhanced", True)))
@@ -978,7 +1217,9 @@ class App:
         self.max_steps_var.set(str(self.settings.get("max_steps") or "30"))
         self.confirm_var.set(bool(self.settings.get("confirm_actions", False)))
         self.hide_window_var.set(bool(self.settings.get("hide_window_while_running", True)))
-        self.visual_feedback_enabled_var.set(bool(self.settings.get("visual_feedback_enabled", True)))
+        self.visual_feedback_enabled_var.set(
+            bool(self.settings.get("visual_feedback_enabled", True))
+        )
         self.color_scheme_var.set(str(self.settings.get("color_scheme") or "default"))
         self.browser_dom_var.set(bool(self.settings.get("browser_dom_enabled", True)))
         self.browser_dom_first_var.set(bool(self.settings.get("browser_dom_first", True)))
@@ -990,7 +1231,9 @@ class App:
         self.extra_body_text.insert("1.0", str(self.settings.get("extra_body_json") or "{}"))
         self.task_text.delete("1.0", "end")
         self.task_text.insert("1.0", str(self.settings.get("last_task") or ""))
-        self._set_reasoning_placeholder("这里显示模型每一步原样公开说出来的话，不直接暴露原始隐藏思维链。")
+        self._set_reasoning_placeholder(
+            "这里显示模型每一步原样公开说出来的话，不直接暴露原始隐藏思维链。"
+        )
         self._set_analysis_text("这里显示动作理由、参数和官方 thinking 元信息。")
         self._refresh_mode_ui()
 
@@ -1008,10 +1251,15 @@ class App:
         self.current_session_root = session_config.session_root
         self.session_hint.configure(text=f"会话目录：{session_config.session_root.name}")
         mode_name = self._mode_name(provider_config.provider_kind)
-        self.meta_var.set(f"模式：{mode_name} · 模型：{provider_config.model} · 最大步数：{session_config.max_steps}")
+        self.meta_var.set(
+            f"模式：{mode_name} · 模型：{provider_config.model} · 最大步数：{session_config.max_steps}"
+        )
         self._append_log("系统", f"会话目录：{session_config.session_root}")
         self._append_log("系统", f"运行模式：{mode_name}")
-        self._append_log("系统", f"目标分辨率：{session_config.target_resolution} · 模型家族：{session_config.model_family_hint}")
+        self._append_log(
+            "系统",
+            f"目标分辨率：{session_config.target_resolution} · 模型家族：{session_config.model_family_hint}",
+        )
         if provider_config.enable_compact:
             self._append_log("系统", "compact-2026-01-12 长对话压缩：已启用")
         if provider_config.advisor_enabled:
@@ -1021,10 +1269,15 @@ class App:
             self._append_log("系统", f"anthropic-version={preview_provider.version}")
             self._append_log("系统", f"anthropic-beta={preview_provider.beta_header}")
             self._append_log("系统", f"computer tool={preview_provider.tool_type}")
-            self._append_log("系统", f"官方模式：{'增强原生' if session_config.official_enhanced else '纯原生'}")
+            self._append_log(
+                "系统", f"官方模式：{'增强原生' if session_config.official_enhanced else '纯原生'}"
+            )
         elif provider_config.provider_kind == PROVIDER_SEMI_OFFICIAL:
             self._append_log("系统", "半官方模式 v3：Messages API 请求体 + Bearer Token 认证")
-            self._append_log("系统", f"computer tool={provider_config.anthropic_tool_type or 'computer_20251124'}")
+            self._append_log(
+                "系统",
+                f"computer tool={provider_config.anthropic_tool_type or 'computer_20251124'}",
+            )
             if provider_config.anthropic_beta:
                 self._append_log("系统", f"anthropic-beta（手动）={provider_config.anthropic_beta}")
             elif provider_config.enable_thinking or provider_config.enable_compact:
@@ -1032,14 +1285,19 @@ class App:
             else:
                 self._append_log("系统", "未启用 anthropic-beta 头（中转站透明转发模式）")
         elif provider_config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE:
-            self._append_log("系统", "官方体验兼容：走 OpenAI-compatible 中转站，但只暴露单 computer 工具并禁用 DOM。")
+            self._append_log(
+                "系统",
+                "官方体验兼容：走 OpenAI-compatible 中转站，但只暴露单 computer 工具并禁用 DOM。",
+            )
         elif session_config.browser_dom_enabled:
             self._append_log(
                 "系统",
                 f"浏览器 DOM：已启用，调试端口 {session_config.browser_debug_host}:{session_config.browser_debug_port}",
             )
             if session_config.browser_dom_first:
-                self._append_log("系统", "网页任务 DOM 优先：已启用，明显网页任务会先要求模型尝试 browser_dom。")
+                self._append_log(
+                    "系统", "网页任务 DOM 优先：已启用，明显网页任务会先要求模型尝试 browser_dom。"
+                )
         if session_config.hide_window_while_running:
             self._append_log("系统", "已启用运行时自动隐藏窗口。")
         diagnostics = provider_diagnostics(provider_config)
@@ -1059,7 +1317,9 @@ class App:
         else:
             self._start_worker(provider_config, session_config, task)
 
-    def _start_worker(self, provider_config: ProviderConfig, session_config: SessionConfig, task: str) -> None:
+    def _start_worker(
+        self, provider_config: ProviderConfig, session_config: SessionConfig, task: str
+    ) -> None:
         self.worker = threading.Thread(
             target=self._run_agent,
             args=(provider_config, session_config, task),
@@ -1083,11 +1343,17 @@ class App:
             if port <= 0 or port > 65535:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("端口有误", "浏览器调试端口必须在 1 到 65535 之间。", parent=self.root)
+            messagebox.showerror(
+                "端口有误", "浏览器调试端口必须在 1 到 65535 之间。", parent=self.root
+            )
             return
         edge_path = self._find_edge_executable()
         if not edge_path:
-            messagebox.showerror("未找到 Edge", "没有找到 msedge.exe。你也可以手动用 --remote-debugging-port 启动 Chrome/Edge。", parent=self.root)
+            messagebox.showerror(
+                "未找到 Edge",
+                "没有找到 msedge.exe。你也可以手动用 --remote-debugging-port 启动 Chrome/Edge。",
+                parent=self.root,
+            )
             return
         user_data_dir = Path(tempfile.gettempdir()) / "computer-use-edge-profile"
         args = [
@@ -1115,7 +1381,9 @@ class App:
             messagebox.showerror("自检参数有误", str(exc), parent=self.root)
             return
         self._append_log("诊断", "开始本机自检：截图、桌面控制、浏览器 DOM。")
-        threading.Thread(target=self._run_local_diagnostics, args=(session_config,), daemon=True).start()
+        threading.Thread(
+            target=self._run_local_diagnostics, args=(session_config,), daemon=True
+        ).start()
 
     def _run_local_diagnostics(self, session_config: SessionConfig) -> None:
         for item in run_local_preflight(session_config):
@@ -1128,7 +1396,9 @@ class App:
             messagebox.showerror("接口地址为空", "请先填写接口地址。", parent=self.root)
             return
         if not api_key:
-            messagebox.showerror("API Key 为空", "请先填写 API Key 才能拉取模型列表。", parent=self.root)
+            messagebox.showerror(
+                "API Key 为空", "请先填写 API Key 才能拉取模型列表。", parent=self.root
+            )
             return
         url = self._build_models_url(base_url)
         try:
@@ -1155,10 +1425,14 @@ class App:
             api_key = self.advisor_api_key_var.get().strip()
             err_prefix = "自定义模式下，"
         if not base_url:
-            messagebox.showerror("接口地址为空", f"{err_prefix}请先填写接口地址。", parent=self.root)
+            messagebox.showerror(
+                "接口地址为空", f"{err_prefix}请先填写接口地址。", parent=self.root
+            )
             return
         if not api_key:
-            messagebox.showerror("API Key 为空", f"{err_prefix}请先填写 API Key。", parent=self.root)
+            messagebox.showerror(
+                "API Key 为空", f"{err_prefix}请先填写 API Key。", parent=self.root
+            )
             return
         url = self._build_models_url(base_url)
         try:
@@ -1177,7 +1451,9 @@ class App:
         ).start()
 
     @staticmethod
-    def _build_fetch_headers(base_url: str, api_key: str, extra_headers: dict[str, Any]) -> dict[str, str]:
+    def _build_fetch_headers(
+        base_url: str, api_key: str, extra_headers: dict[str, Any]
+    ) -> dict[str, str]:
         headers: dict[str, str] = {
             "Accept": "application/json",
             "Authorization": f"Bearer {api_key}",
@@ -1187,7 +1463,10 @@ class App:
             headers.setdefault(key, value)
         # If base_url IS api.anthropic.com, ensure at least a UA is present so
         # /models still works through corporate proxies; ignored otherwise.
-        headers.setdefault("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
+        headers.setdefault(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        )
         for key, value in (extra_headers or {}).items():
             headers[str(key)] = str(value)
         return headers
@@ -1262,7 +1541,9 @@ class App:
         return deduped
 
     def _restore_refresh_button(self, target: str) -> None:
-        button = self.refresh_models_button if target == "main" else self.refresh_advisor_models_button
+        button = (
+            self.refresh_models_button if target == "main" else self.refresh_advisor_models_button
+        )
         if button is not None:
             try:
                 button.configure(text="⟳", state="normal")
@@ -1272,7 +1553,9 @@ class App:
     def _on_models_fetched(self, models: list[str], target: str) -> None:
         self._restore_refresh_button(target)
         if not models:
-            messagebox.showinfo("未找到模型", "接口返回为空。可能不支持 /models 端点。", parent=self.root)
+            messagebox.showinfo(
+                "未找到模型", "接口返回为空。可能不支持 /models 端点。", parent=self.root
+            )
             return
         self._show_models_popup(models, target)
 
@@ -1345,7 +1628,10 @@ class App:
         listbox.bind("<Double-Button-1>", commit)
         listbox.bind("<Return>", commit)
         listbox.bind("<Escape>", cancel)
-        popup.bind("<FocusOut>", lambda _e: popup.after(200, lambda: popup.winfo_exists() and popup.destroy()))
+        popup.bind(
+            "<FocusOut>",
+            lambda _e: popup.after(200, lambda: popup.winfo_exists() and popup.destroy()),
+        )
         listbox.focus_set()
 
     @staticmethod
@@ -1354,9 +1640,21 @@ class App:
         if found:
             return found
         candidates = [
-            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-            Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
+            / "Microsoft"
+            / "Edge"
+            / "Application"
+            / "msedge.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
+            / "Microsoft"
+            / "Edge"
+            / "Application"
+            / "msedge.exe",
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "Microsoft"
+            / "Edge"
+            / "Application"
+            / "msedge.exe",
         ]
         for candidate in candidates:
             if candidate.exists():
@@ -1550,7 +1848,9 @@ class App:
             if self._overlay is not None:
                 self._overlay.set_state("done")
 
-    def _run_agent(self, provider_config: ProviderConfig, session_config: SessionConfig, task: str) -> None:
+    def _run_agent(
+        self, provider_config: ProviderConfig, session_config: SessionConfig, task: str
+    ) -> None:
         try:
             agent = ComputerUseAgent(
                 provider_config,
@@ -1602,8 +1902,12 @@ class App:
             raise ValueError("浏览器调试端口必须在 1 到 65535 之间。")
         browser_debug_host = self.browser_debug_host_var.get().strip() or "127.0.0.1"
 
-        extra_headers = self._parse_json_object(self.extra_headers_text.get("1.0", "end").strip(), "额外请求头 JSON")
-        extra_body = self._parse_json_object(self.extra_body_text.get("1.0", "end").strip(), "额外请求体 JSON")
+        extra_headers = self._parse_json_object(
+            self.extra_headers_text.get("1.0", "end").strip(), "额外请求头 JSON"
+        )
+        extra_body = self._parse_json_object(
+            self.extra_body_text.get("1.0", "end").strip(), "额外请求体 JSON"
+        )
 
         anthropic_version = self.anthropic_version_var.get().strip() or ANTHROPIC_VERSION_DEFAULT
         anthropic_beta = self.anthropic_beta_var.get().strip()
@@ -1802,7 +2106,9 @@ class App:
         if not content:
             return
         current = self.reasoning_text.get("1.0", "end").strip()
-        if current.startswith("这里显示模型每一步原样公开说出来的话") or current.startswith("等待模型输出第一句公开思考"):
+        if current.startswith("这里显示模型每一步原样公开说出来的话") or current.startswith(
+            "等待模型输出第一句公开思考"
+        ):
             self._clear_public_reasoning()
         tag = "派生说明" if derived else "公开思考"
         if step is None:
@@ -1830,11 +2136,31 @@ class App:
         dialog.configure(bg=BG)
 
         approved = {"value": False}
-        card = tk.Frame(dialog, bg=PANEL, highlightbackground=BORDER, highlightthickness=1, bd=0, padx=18, pady=18)
+        card = tk.Frame(
+            dialog,
+            bg=PANEL,
+            highlightbackground=BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=18,
+            pady=18,
+        )
         card.pack(fill="both", expand=True, padx=16, pady=16)
 
-        tk.Label(card, text="即将执行以下操作", bg=PANEL, fg=TEXT, font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
-        tk.Label(card, text="你开启了逐步确认，因此这一步需要你点一下。", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(4, 10))
+        tk.Label(
+            card,
+            text="即将执行以下操作",
+            bg=PANEL,
+            fg=TEXT,
+            font=("Microsoft YaHei UI", 13, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            card,
+            text="你开启了逐步确认，因此这一步需要你点一下。",
+            bg=PANEL,
+            fg=MUTED,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(4, 10))
 
         message = tk.Text(
             card,
@@ -1866,8 +2192,12 @@ class App:
             approved["value"] = False
             dialog.destroy()
 
-        ttk.Button(buttons, text="允许这次操作", command=allow, style="Accent.TButton").pack(side="left")
-        ttk.Button(buttons, text="拒绝这次操作", command=reject, style="Soft.TButton").pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="允许这次操作", command=allow, style="Accent.TButton").pack(
+            side="left"
+        )
+        ttk.Button(buttons, text="拒绝这次操作", command=reject, style="Soft.TButton").pack(
+            side="left", padx=(8, 0)
+        )
         dialog.protocol("WM_DELETE_WINDOW", reject)
         dialog.update_idletasks()
         dialog.geometry(f"+{self.root.winfo_rootx() + 140}+{self.root.winfo_rooty() + 120}")
@@ -1911,7 +2241,10 @@ class App:
             bg, fg = "#F2E4D4", WARNING
         elif tone == "error":
             bg, fg = "#F0DEDA", ERROR
-        elif self.provider_kind_var.get() in {PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE}:
+        elif self.provider_kind_var.get() in {
+            PROVIDER_ANTHROPIC_OFFICIAL,
+            PROVIDER_OFFICIAL_COMPATIBLE,
+        }:
             bg, fg = OFFICIAL_SOFT, OFFICIAL
         else:
             bg, fg = ACCENT_SOFT, ACCENT_ACTIVE
@@ -1976,7 +2309,9 @@ class App:
             "extra_body_json": self.extra_body_text.get("1.0", "end").strip() or "{}",
             "last_task": task,
         }
-        SETTINGS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        SETTINGS_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
 
 def launch() -> int:
@@ -1985,6 +2320,7 @@ def launch() -> int:
     # creates Tk before the controller; setting it here is safer.
     try:
         import ctypes
+
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except Exception:

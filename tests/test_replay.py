@@ -61,7 +61,11 @@ class ReplayTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             replay = SessionReplay(root)
-            replay.record_initial(task="打开 B 站", provider_kind="openai_compatible", snapshot=fake_snapshot("001_initial.jpg"))
+            replay.record_initial(
+                task="打开 B 站",
+                provider_kind="openai_compatible",
+                snapshot=fake_snapshot("001_initial.jpg"),
+            )
             replay.record_step(
                 step=1,
                 tool_name="computer",

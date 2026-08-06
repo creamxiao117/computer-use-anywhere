@@ -19,7 +19,9 @@ class McpServer:
     def __init__(self, session_config: SessionConfig) -> None:
         self.session_config = session_config
         self.desktop = WindowsDesktopController(session_config)
-        self.browser_dom = BrowserDomController(session_config) if session_config.browser_dom_enabled else None
+        self.browser_dom = (
+            BrowserDomController(session_config) if session_config.browser_dom_enabled else None
+        )
         self.tools: dict[str, ToolHandler] = {}
         self._register_tools()
 
@@ -47,11 +49,14 @@ class McpServer:
         method = request.get("method")
         req_id = request.get("id")
         if method == "initialize":
-            return self._result(req_id, {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "computer-use-anywhere", "version": "3.0.0"},
-            })
+            return self._result(
+                req_id,
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "computer-use-anywhere", "version": "3.0.0"},
+                },
+            )
         if method == "tools/list":
             return self._result(req_id, {"tools": self._tool_schemas()})
         if method == "tools/call":
@@ -63,7 +68,10 @@ class McpServer:
                 return self._error(req_id, f"Unknown tool: {name}")
             try:
                 result = handler(arguments)
-                return self._result(req_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]})
+                return self._result(
+                    req_id,
+                    {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]},
+                )
             except Exception as exc:
                 return self._error(req_id, f"{type(exc).__name__}: {exc}")
         if req_id is not None:
@@ -105,21 +113,23 @@ class McpServer:
             },
         ]
         if self.browser_dom is not None:
-            schemas.append({
-                "name": "browser_dom",
-                "description": "Operate browser DOM via Chrome DevTools Protocol.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string"},
-                        "target": {"type": "string"},
-                        "url": {"type": "string"},
-                        "selector": {"type": "string"},
-                        "text": {"type": "string"},
+            schemas.append(
+                {
+                    "name": "browser_dom",
+                    "description": "Operate browser DOM via Chrome DevTools Protocol.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string"},
+                            "target": {"type": "string"},
+                            "url": {"type": "string"},
+                            "selector": {"type": "string"},
+                            "text": {"type": "string"},
+                        },
+                        "required": ["action"],
                     },
-                    "required": ["action"],
-                },
-            })
+                }
+            )
         return schemas
 
     def _handle_computer(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -153,6 +163,7 @@ class McpServer:
 
 def main() -> int:
     import argparse
+
     parser = argparse.ArgumentParser(description="Claude Computer Use MCP Server")
     parser.add_argument("--browser-debug-port", type=int, default=9222)
     parser.add_argument("--browser-debug-host", type=str, default="127.0.0.1")

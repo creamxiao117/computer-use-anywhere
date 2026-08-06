@@ -82,7 +82,10 @@ class SkillRegistry:
                 )
                 self._mcp_processes[skill.name] = proc
                 # Initialize
-                init_req = json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}) + "\n"
+                init_req = (
+                    json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}})
+                    + "\n"
+                )
                 proc.stdin.write(init_req)  # type: ignore[union-attr]
                 proc.stdin.flush()  # type: ignore[union-attr]
                 # Read init response
@@ -119,44 +122,50 @@ def built_in_skills() -> SkillRegistry:
     """Return a registry with built-in skills pre-registered."""
     registry = SkillRegistry()
     # Example: file read/write skill (placeholder implementation)
-    registry.register(SkillDefinition(
-        name="file_read",
-        description="Read a text file from the local filesystem.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Absolute file path."},
+    registry.register(
+        SkillDefinition(
+            name="file_read",
+            description="Read a text file from the local filesystem.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute file path."},
+                },
+                "required": ["path"],
             },
-            "required": ["path"],
-        },
-        handler=lambda args: {"content": _read_file(args.get("path", ""))},
-    ))
-    registry.register(SkillDefinition(
-        name="file_write",
-        description="Write text to a file on the local filesystem.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
+            handler=lambda args: {"content": _read_file(args.get("path", ""))},
+        )
+    )
+    registry.register(
+        SkillDefinition(
+            name="file_write",
+            description="Write text to a file on the local filesystem.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
             },
-            "required": ["path", "content"],
-        },
-        handler=lambda args: _write_file(args.get("path", ""), args.get("content", "")),
-    ))
-    registry.register(SkillDefinition(
-        name="shell",
-        description="Run a shell command and return stdout/stderr.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "command": {"type": "string"},
-                "timeout": {"type": "integer", "default": 30},
+            handler=lambda args: _write_file(args.get("path", ""), args.get("content", "")),
+        )
+    )
+    registry.register(
+        SkillDefinition(
+            name="shell",
+            description="Run a shell command and return stdout/stderr.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer", "default": 30},
+                },
+                "required": ["command"],
             },
-            "required": ["command"],
-        },
-        handler=lambda args: _run_shell(args.get("command", ""), args.get("timeout", 30)),
-    ))
+            handler=lambda args: _run_shell(args.get("command", ""), args.get("timeout", 30)),
+        )
+    )
     return registry
 
 
@@ -179,8 +188,11 @@ def _write_file(path: str, content: str) -> dict[str, Any]:
 
 def _run_shell(command: str, timeout: int) -> dict[str, Any]:
     import subprocess
+
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True, timeout=timeout
+        )
         return {
             "returncode": result.returncode,
             "stdout": result.stdout[:4000],

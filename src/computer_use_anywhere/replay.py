@@ -96,10 +96,16 @@ class SessionReplay:
                 _section(
                     f"第 {record.get('step')} 步 · {record.get('tool_name')} · {record.get('action')}",
                     [
-                        ("验证", f"{verification.get('status') or ''}｜{verification.get('message') or ''}"),
+                        (
+                            "验证",
+                            f"{verification.get('status') or ''}｜{verification.get('message') or ''}",
+                        ),
                         ("公开说明", str(record.get("public_reasoning") or "")),
                         ("模型文本", str(record.get("model_text") or "")),
-                        ("动作参数", json.dumps(record.get("arguments") or {}, ensure_ascii=False, indent=2)),
+                        (
+                            "动作参数",
+                            json.dumps(record.get("arguments") or {}, ensure_ascii=False, indent=2),
+                        ),
                         ("执行结果", str(record.get("result_message") or "")),
                         ("执行前", _image_html((record.get("before_snapshot") or {}).get("path"))),
                         ("执行后", _image_html((record.get("after_snapshot") or {}).get("path"))),
@@ -127,7 +133,7 @@ class SessionReplay:
 <body>
   <h1>Computer Use 会话复盘</h1>
   <p class="final">最终结果：{html.escape(final_text or "")}</p>
-  {''.join(rows)}
+  {"".join(rows)}
 </body>
 </html>
 """
@@ -149,9 +155,13 @@ def verify_action_result(
     lowered_result = result.casefold()
 
     if "失败" in result or "出错" in result or "拒绝" in result or "不可用" in result:
-        return ActionVerification("warn", "工具返回了失败/拒绝/不可用信息，需要模型基于最新截图修正。")
+        return ActionVerification(
+            "warn", "工具返回了失败/拒绝/不可用信息，需要模型基于最新截图修正。"
+        )
     if tool_name == "browser_dom":
-        return ActionVerification("ok", "DOM 工具已返回结构化结果；后续应优先用 DOM 结果验证网页状态。")
+        return ActionVerification(
+            "ok", "DOM 工具已返回结构化结果；后续应优先用 DOM 结果验证网页状态。"
+        )
     if action in {"screenshot", "wait"}:
         return ActionVerification("info", "观察类动作不要求画面变化。")
 
@@ -167,27 +177,38 @@ def verify_action_result(
     if after_snapshot is not None:
         foreground = after_snapshot.foreground_window_title or ""
         if _title_contains(foreground, own_window_title) and action in {"type", "key"}:
-            return ActionVerification("warn", "执行后前台仍是代理窗口，输入类动作可能没有进入目标应用。")
-        expected = str(arguments.get("expected_window_title") or arguments.get("target_window_title") or "").strip()
+            return ActionVerification(
+                "warn", "执行后前台仍是代理窗口，输入类动作可能没有进入目标应用。"
+            )
+        expected = str(
+            arguments.get("expected_window_title") or arguments.get("target_window_title") or ""
+        ).strip()
         if expected and action in {"type", "key"} and not _title_contains(foreground, expected):
-            return ActionVerification("warn", f"执行后前台窗口“{foreground or '未知'}”不匹配期望“{expected}”。")
+            return ActionVerification(
+                "warn", f"执行后前台窗口“{foreground or '未知'}”不匹配期望“{expected}”。"
+            )
         if action == "activate_window":
             query = str(arguments.get("window_title") or arguments.get("title") or "").strip()
             if query and _title_contains(foreground, query):
                 return ActionVerification("ok", f"前台窗口已匹配“{query}”。")
-            return ActionVerification("warn", f"激活窗口后前台是“{foreground or '未知'}”，未确认匹配目标窗口。")
+            return ActionVerification(
+                "warn", f"激活窗口后前台是“{foreground or '未知'}”，未确认匹配目标窗口。"
+            )
 
     # 微验证: 按动作类型给出差异化的 "几乎无变化" 反馈
     has_no_change = "几乎没有变化" in result or "变化很小" in result
     if has_no_change:
-        if action in {"left_click", "click", "double_click", "right_click", "middle_click"} and click_xy:
+        if (
+            action in {"left_click", "click", "double_click", "right_click", "middle_click"}
+            and click_xy
+        ):
             return ActionVerification(
                 "warn",
                 f"⚠️ 点击 ({click_xy[0]}, {click_xy[1]}) 后画面几乎无变化。"
                 f"**这强烈提示点错了位置或目标不可点击**。请重新观察当前截图，"
                 f"特别注意 ({click_xy[0]}, {click_xy[1]}) 附近 ±40px 范围内是否真有可点击元素 "
                 f"(按钮 / 链接 / 图标)。若该位置没有目标元素，请重新定位到正确像素；"
-                f"若有但 UI 反应慢，可调用 wait()。"
+                f"若有但 UI 反应慢，可调用 wait()。",
             )
         if action in {"type", "key"}:
             return ActionVerification(

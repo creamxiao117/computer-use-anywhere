@@ -33,7 +33,9 @@ class AgentTests(unittest.TestCase):
         self.assertIn("Anthropic 官方 computer use 协议", prompt)
 
     def test_prompt_can_use_pure_official_mode(self) -> None:
-        prompt = build_system_prompt(1920, 1080, 1536, 864, official_mode=True, official_enhanced=False)
+        prompt = build_system_prompt(
+            1920, 1080, 1536, 864, official_mode=True, official_enhanced=False
+        )
         self.assertIn("官方纯原生", prompt)
         self.assertNotIn("browser_dom", prompt)
         self.assertNotIn("遮挡或涂灰", prompt)
@@ -54,7 +56,9 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(normalized["action"], "activate_window")
 
     def test_normalize_computer_action_accepts_coordinate_dict(self) -> None:
-        normalized = normalize_computer_action({"action": "click", "coordinate": {"x": "10.4", "y": 20}})
+        normalized = normalize_computer_action(
+            {"action": "click", "coordinate": {"x": "10.4", "y": 20}}
+        )
         self.assertEqual(normalized["action"], "left_click")
         self.assertEqual(normalized["coordinate"], [10, 20])
 
@@ -63,7 +67,9 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(normalized["coordinate"], [10, 20])
 
     def test_openai_tool_schema_exposes_single_computer_function(self) -> None:
-        provider = OpenAICompatibleProvider(ProviderConfig(base_url="https://x.test", api_key="k", model="m"))
+        provider = OpenAICompatibleProvider(
+            ProviderConfig(base_url="https://x.test", api_key="k", model="m")
+        )
         tools = provider.build_tools(1000, 800)
         names = [tool["function"]["name"] for tool in tools]
         self.assertIn("computer", names)
@@ -91,7 +97,9 @@ class AgentTests(unittest.TestCase):
     def test_browser_dom_state_text_mentions_port(self) -> None:
         agent = ComputerUseAgent.__new__(ComputerUseAgent)
         agent.browser_dom = object()
-        agent.session_config = SessionConfig(browser_debug_host="127.0.0.1", browser_debug_port=9222)
+        agent.session_config = SessionConfig(
+            browser_debug_host="127.0.0.1", browser_debug_port=9222
+        )
         state = agent._browser_dom_state_text(False)
         self.assertIn("浏览器 DOM 工具：已启用", state)
         self.assertIn("127.0.0.1:9222", state)

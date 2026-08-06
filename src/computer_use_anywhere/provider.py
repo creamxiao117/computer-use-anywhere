@@ -107,7 +107,9 @@ def anthropic_official_diagnostics(config: ProviderConfig) -> list[str]:
             "Anthropic Messages 的请求体、content blocks 和 anthropic-beta。"
         )
     if "openai" in lowered and "anthropic" not in lowered:
-        diagnostics.append("当前接口看起来像 OpenAI 兼容服务；官方模式可能因为协议不匹配而 400/404。")
+        diagnostics.append(
+            "当前接口看起来像 OpenAI 兼容服务；官方模式可能因为协议不匹配而 400/404。"
+        )
 
     manual_beta = config.anthropic_beta.strip()
     if manual_beta:
@@ -147,13 +149,21 @@ def openai_compatible_diagnostics(config: ProviderConfig) -> list[str]:
             "如果这是官方 Anthropic 地址，请切到官方模式。"
         )
     if "api.anthropic.com" in lowered:
-        diagnostics.append("api.anthropic.com 原生不走 OpenAI-compatible 工具调用；建议使用官方模式。")
+        diagnostics.append(
+            "api.anthropic.com 原生不走 OpenAI-compatible 工具调用；建议使用官方模式。"
+        )
     if lowered.endswith("/responses"):
         diagnostics.append("当前接口像 OpenAI Responses API；兼容模式需要 chat/completions。")
     if config.extra_body.get("stream") is True:
-        diagnostics.append("当前项目还不消费流式响应；extra body 里 stream=true 会导致解析失败，建议关闭。")
-    if config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE and ("api.anthropic.com" in lowered or "/messages" in lowered):
-        diagnostics.append("官方体验兼容模式仍走 /chat/completions；如果你使用原生 Anthropic /messages，请切到真官方模式。")
+        diagnostics.append(
+            "当前项目还不消费流式响应；extra body 里 stream=true 会导致解析失败，建议关闭。"
+        )
+    if config.provider_kind == PROVIDER_OFFICIAL_COMPATIBLE and (
+        "api.anthropic.com" in lowered or "/messages" in lowered
+    ):
+        diagnostics.append(
+            "官方体验兼容模式仍走 /chat/completions；如果你使用原生 Anthropic /messages，请切到真官方模式。"
+        )
 
     return diagnostics
 
@@ -533,7 +543,9 @@ class OpenAICompatibleProvider:
         if "action" in payload:
             return ToolCall(call_id="json_fallback", name="computer", arguments=payload)
         if payload.get("name") == "computer" and isinstance(payload.get("arguments"), dict):
-            return ToolCall(call_id="json_fallback", name="computer", arguments=payload["arguments"])
+            return ToolCall(
+                call_id="json_fallback", name="computer", arguments=payload["arguments"]
+            )
         return None
 
     @staticmethod
@@ -542,7 +554,9 @@ class OpenAICompatibleProvider:
         stripped = text.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             candidates.append(stripped)
-        for match in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE):
+        for match in re.finditer(
+            r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE
+        ):
             candidates.append(match.group(1))
         for candidate in candidates:
             try:
@@ -672,7 +686,9 @@ class AnthropicOfficialProvider:
                 "budget_tokens": budget,
             }
         payload.update(self.config.extra_body)
-        body = OpenAICompatibleProvider._post_json(self._messages_url(self.config.base_url), payload, self._headers())
+        body = OpenAICompatibleProvider._post_json(
+            self._messages_url(self.config.base_url), payload, self._headers()
+        )
         return self._parse_response_body(body)
 
     def _resolve_thinking_budget(self) -> int:
@@ -745,11 +761,15 @@ class AnthropicOfficialProvider:
 
         reasoning_parts: list[str] = []
         if thinking_blocks:
-            reasoning_parts.append(f"已启用官方 thinking，本轮收到 {thinking_blocks} 个 thinking 块。")
+            reasoning_parts.append(
+                f"已启用官方 thinking，本轮收到 {thinking_blocks} 个 thinking 块。"
+            )
         if redacted_blocks:
             reasoning_parts.append(f"另有 {redacted_blocks} 个加密 thinking 块。")
         if reasoning_parts:
-            reasoning_parts.append("为避免直接暴露原始思维链，界面只显示可见摘要，不直接显示 thinking 原文。")
+            reasoning_parts.append(
+                "为避免直接暴露原始思维链，界面只显示可见摘要，不直接显示 thinking 原文。"
+            )
 
         return AssistantReply(
             text="\n".join(chunk for chunk in text_chunks if chunk).strip(),

@@ -147,9 +147,21 @@ def hsv_array_to_rgb(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
     q = v * (1.0 - s * f)
     t = v * (1.0 - s * (1.0 - f))
 
-    r = np.where(i == 0, v, np.where(i == 1, q, np.where(i == 2, p, np.where(i == 3, p, np.where(i == 4, t, v)))))
-    g = np.where(i == 0, t, np.where(i == 1, v, np.where(i == 2, v, np.where(i == 3, q, np.where(i == 4, p, p)))))
-    b = np.where(i == 0, p, np.where(i == 1, p, np.where(i == 2, t, np.where(i == 3, v, np.where(i == 4, v, q)))))
+    r = np.where(
+        i == 0,
+        v,
+        np.where(i == 1, q, np.where(i == 2, p, np.where(i == 3, p, np.where(i == 4, t, v)))),
+    )
+    g = np.where(
+        i == 0,
+        t,
+        np.where(i == 1, v, np.where(i == 2, v, np.where(i == 3, q, np.where(i == 4, p, p)))),
+    )
+    b = np.where(
+        i == 0,
+        p,
+        np.where(i == 1, p, np.where(i == 2, t, np.where(i == 3, v, np.where(i == 4, v, q)))),
+    )
 
     rgb = np.stack([r, g, b], axis=-1)
     return (rgb * 255.0).clip(0, 255).astype(np.uint8)
@@ -218,6 +230,7 @@ class _StateSpec:
     - "startup":  扫光淡入
     - "stale":    单色慢呼吸
     """
+
     kind: str = "rotating"
     hue_range: tuple[float, float] = (0.0, 360.0)
     saturation: float = 0.95
@@ -234,49 +247,92 @@ class _StateSpec:
 
 _STATE_TABLE: dict[str, _StateSpec] = {
     "startup": _StateSpec(
-        kind="startup", hue_range=(0.0, 360.0), saturation=0.95,
-        rotate_period=1.5, v_lo=0.0, v_hi=0.4, breath_period=1.5, flow=True,
+        kind="startup",
+        hue_range=(0.0, 360.0),
+        saturation=0.95,
+        rotate_period=1.5,
+        v_lo=0.0,
+        v_hi=0.4,
+        breath_period=1.5,
+        flow=True,
     ),
     "main_idle": _StateSpec(
-        kind="solid_breath", solid_hue=190.0, saturation=0.65,
-        v_lo=0.35, v_hi=0.62, breath_period=6.0,
+        kind="solid_breath",
+        solid_hue=190.0,
+        saturation=0.65,
+        v_lo=0.35,
+        v_hi=0.62,
+        breath_period=6.0,
     ),
     "main_running": _StateSpec(
-        kind="rotating", hue_range=(0.0, 360.0), saturation=1.00,
-        rotate_period=25.0, v_lo=0.70, v_hi=1.00, breath_period=3.0, flow=True,
+        kind="rotating",
+        hue_range=(0.0, 360.0),
+        saturation=1.00,
+        rotate_period=25.0,
+        v_lo=0.70,
+        v_hi=1.00,
+        breath_period=3.0,
+        flow=True,
     ),
     "advisor_idle": _StateSpec(
-        kind="solid_breath", solid_hue=38.0, saturation=0.70,
-        v_lo=0.40, v_hi=0.68, breath_period=6.0,
+        kind="solid_breath",
+        solid_hue=38.0,
+        saturation=0.70,
+        v_lo=0.40,
+        v_hi=0.68,
+        breath_period=6.0,
     ),
     "advisor_running": _StateSpec(
-        kind="rotating", hue_range=(20.0, 80.0), saturation=1.00,
-        rotate_period=25.0, v_lo=0.75, v_hi=1.00, breath_period=3.0, flow=True,
+        kind="rotating",
+        hue_range=(20.0, 80.0),
+        saturation=1.00,
+        rotate_period=25.0,
+        v_lo=0.75,
+        v_hi=1.00,
+        breath_period=3.0,
+        flow=True,
     ),
     "warning": _StateSpec(
-        kind="flash", solid_hue=32.0, saturation=1.0,
-        v_lo=0.5, v_hi=1.0, flash_period=0.4, flash_cycles=2,
+        kind="flash",
+        solid_hue=32.0,
+        saturation=1.0,
+        v_lo=0.5,
+        v_hi=1.0,
+        flash_period=0.4,
+        flash_cycles=2,
     ),
     "error": _StateSpec(
-        kind="flash", solid_hue=0.0, saturation=1.0,
-        v_lo=0.5, v_hi=1.0, flash_period=0.3, flash_cycles=3,
+        kind="flash",
+        solid_hue=0.0,
+        saturation=1.0,
+        v_lo=0.5,
+        v_hi=1.0,
+        flash_period=0.3,
+        flash_cycles=3,
     ),
     "done": _StateSpec(
-        kind="sweep", solid_hue=135.0, saturation=0.85,
-        v_lo=0.4, v_hi=1.0, rotate_period=1.5,
+        kind="sweep",
+        solid_hue=135.0,
+        saturation=0.85,
+        v_lo=0.4,
+        v_hi=1.0,
+        rotate_period=1.5,
     ),
     "stale": _StateSpec(
-        kind="stale", saturation=0.0,
-        v_lo=0.20, v_hi=0.45, breath_period=4.0,
+        kind="stale",
+        saturation=0.0,
+        v_lo=0.20,
+        v_hi=0.45,
+        breath_period=4.0,
     ),
 }
 
 
 # 不同 color_scheme 的色相位移 / 饱和度倍率
 _SCHEME_TWEAKS: dict[str, dict[str, float]] = {
-    "default":    {"hue_shift": 0.0, "sat_mul": 1.0},
-    "cyber":      {"hue_shift": -30.0, "sat_mul": 1.1},
-    "subtle":     {"hue_shift": 0.0, "sat_mul": 0.55},
+    "default": {"hue_shift": 0.0, "sat_mul": 1.0},
+    "cyber": {"hue_shift": -30.0, "sat_mul": 1.1},
+    "subtle": {"hue_shift": 0.0, "sat_mul": 0.55},
     "monochrome": {"hue_shift": 0.0, "sat_mul": 0.0},
 }
 
@@ -292,7 +348,9 @@ class BreathingOverlay:
     所有公开方法均线程安全 - 内部用 root.after(0, ...) 切回主线程。
     """
 
-    TRANSPARENT_COLOR = "#FE00FE"  # v4.1: 不用纯 #FF00FF — HSV(300°,1.0,1.0) 会产出 magenta 把光带钻穿
+    TRANSPARENT_COLOR = (
+        "#FE00FE"  # v4.1: 不用纯 #FF00FF — HSV(300°,1.0,1.0) 会产出 magenta 把光带钻穿
+    )
     TRANSPARENT_RGB = (254, 0, 254)
     EDGE_THICKNESS = 18  # v4.0: 14px 太细看不清色相, 提到 18px (仍是 macOS 边框量级)
     FLOW_PERIOD_SEC = 15.0  # 流光绕一圈
@@ -350,9 +408,7 @@ class BreathingOverlay:
 
         blank = Image.new("RGB", (self.screen_w, self.screen_h), self.TRANSPARENT_RGB)
         self._photo_breath = ImageTk.PhotoImage(blank)
-        self._breath_item = self.canvas.create_image(
-            0, 0, anchor="nw", image=self._photo_breath
-        )
+        self._breath_item = self.canvas.create_image(0, 0, anchor="nw", image=self._photo_breath)
 
         self.top.update_idletasks()
         try:
@@ -392,6 +448,7 @@ class BreathingOverlay:
 
     def destroy(self) -> None:
         """销毁 overlay。线程安全。"""
+
         def _do():
             if self._destroyed:
                 return
@@ -400,6 +457,7 @@ class BreathingOverlay:
                 self.top.destroy()
             except Exception:
                 pass
+
         try:
             self.root.after(0, _do)
         except Exception:
@@ -477,7 +535,7 @@ class BreathingOverlay:
         denom = max(1, thick - core - 2)
         ramp = np.clip(1.0 - (ys - core) / denom, 0.0, 1.0)
         u = np.where(ys < core, 1.0, ramp)
-        u = u ** 1.8  # 更柔和的衰减曲线
+        u = u**1.8  # 更柔和的衰减曲线
         u[-2:] = 0.0
         return u.astype(np.float32)
 
@@ -531,7 +589,7 @@ class BreathingOverlay:
         w, h = img.width, img.height
         curve = self._alpha_curve  # (thick,) float32 — 颜色亮度乘子 (前 65% 厚 1.0,后渐变到 0)
         magenta_rgb = np.array(list(self.TRANSPARENT_RGB), dtype=np.float32)
-        magenta_row_mask = (curve < 0.02)  # bool (thick,) — 最内 2 行强制 magenta
+        magenta_row_mask = curve < 0.02  # bool (thick,) — 最内 2 行强制 magenta
 
         def _build(rgb1d: np.ndarray, a1d: np.ndarray, length: int) -> np.ndarray:
             # rgb1d (length, 3) uint8 — 已含 vs 亮度 + 流光 + 色相旋转
@@ -564,7 +622,9 @@ class BreathingOverlay:
         img.paste(left_img, (0, 0))
         img.paste(right_img, (w - thick, 0))
 
-    def _perimeter_positions(self, w: int, h: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+    def _perimeter_positions(
+        self, w: int, h: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
         """各边像素在屏幕周长上的归一化位置 (0..1)。返回 (top, right, bottom, left, perim)。"""
         perim = 2.0 * (w + h)
         top = np.arange(w, dtype=np.float32) / perim
@@ -857,12 +917,14 @@ class BreathingOverlay:
 
     def _schedule_remove(self, item_ids: list[int], ttl_ms: int) -> None:
         """ttl_ms 毫秒后销毁这些 canvas item。"""
+
         def _kill():
             for iid in item_ids:
                 try:
                     self.canvas.delete(iid)
                 except Exception:
                     pass
+
         try:
             self.root.after(ttl_ms, _kill)
         except Exception:
@@ -881,9 +943,7 @@ class BreathingOverlay:
         step_ms = 16
         steps = max(8, ttl_ms // step_ms)
         for ring in range(rings):
-            iid = self.canvas.create_oval(
-                x - 4, y - 4, x + 4, y + 4, outline=color, width=3
-            )
+            iid = self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline=color, width=3)
             ids.append(iid)
 
             def _grow(i=iid, base_delay=ring * 80, start_r=4):
@@ -900,6 +960,7 @@ class BreathingOverlay:
                         return
                     if s < steps:
                         self.root.after(step_ms, lambda: _step(s + 1))
+
                 self.root.after(base_delay, lambda: _step(1))
 
             _grow()
@@ -912,8 +973,17 @@ class BreathingOverlay:
         step_ms = 16
         steps = max(8, ttl_ms // step_ms)
         iid = self.canvas.create_polygon(
-            x, y - 6, x + 6, y, x, y + 6, x - 6, y,
-            outline=color, fill="", width=3,
+            x,
+            y - 6,
+            x + 6,
+            y,
+            x,
+            y + 6,
+            x - 6,
+            y,
+            outline=color,
+            fill="",
+            width=3,
         )
         ids.append(iid)
 
@@ -922,9 +992,7 @@ class BreathingOverlay:
                 return
             r = 6 + (max_r - 6) * (s / steps)
             try:
-                self.canvas.coords(
-                    iid, x, y - r, x + r, y, x, y + r, x - r, y
-                )
+                self.canvas.coords(iid, x, y - r, x + r, y, x, y + r, x - r, y)
                 width = max(1, int(3 * (1.0 - (s / steps) * 0.7)))
                 self.canvas.itemconfig(iid, width=width)
             except Exception:
@@ -976,16 +1044,18 @@ class BreathingOverlay:
     ) -> None:
         x, y = coord
         iid = self.canvas.create_oval(
-            x - radius, y - radius, x + radius, y + radius,
-            fill=color, outline="",
+            x - radius,
+            y - radius,
+            x + radius,
+            y + radius,
+            fill=color,
+            outline="",
         )
         self._schedule_remove([iid], ttl_ms)
 
     def _effect_ring(self, coord: tuple[int, int], color: str, ttl_ms: int = 400) -> None:
         x, y = coord
-        iid = self.canvas.create_oval(
-            x - 18, y - 18, x + 18, y + 18, outline=color, width=4
-        )
+        iid = self.canvas.create_oval(x - 18, y - 18, x + 18, y + 18, outline=color, width=4)
         self._schedule_remove([iid], ttl_ms)
 
     def _effect_drag_trail(
@@ -998,8 +1068,14 @@ class BreathingOverlay:
         x1, y1 = start
         x2, y2 = end
         iid = self.canvas.create_line(
-            x1, y1, x2, y2, fill=color, width=3,
-            dash=(8, 4), capstyle="round",
+            x1,
+            y1,
+            x2,
+            y2,
+            fill=color,
+            width=3,
+            dash=(8, 4),
+            capstyle="round",
         )
         self._drag_trail_ids.append(iid)
 
@@ -1025,10 +1101,14 @@ class BreathingOverlay:
             offset_y = direction * (10 + i * 18)
             tip_y = y + offset_y
             iid = self.canvas.create_polygon(
-                x - 10, tip_y + direction * 8,
-                x + 10, tip_y + direction * 8,
-                x, tip_y,
-                fill=color, outline="",
+                x - 10,
+                tip_y + direction * 8,
+                x + 10,
+                tip_y + direction * 8,
+                x,
+                tip_y,
+                fill=color,
+                outline="",
             )
             ids.append(iid)
         # 简单的位移动画 (60fps)
@@ -1047,9 +1127,12 @@ class BreathingOverlay:
                     tip_y = y + offset_y + dy
                     self.canvas.coords(
                         iid,
-                        x - 10, tip_y + direction * 8,
-                        x + 10, tip_y + direction * 8,
-                        x, tip_y,
+                        x - 10,
+                        tip_y + direction * 8,
+                        x + 10,
+                        tip_y + direction * 8,
+                        x,
+                        tip_y,
                     )
                 except Exception:
                     return
@@ -1074,8 +1157,13 @@ class BreathingOverlay:
             x0, y0, x1, y1 = cx - 40, cy - 14, cx + 40, cy + 14
         pad_x, pad_y = 18, 8
         bg_id = self.canvas.create_rectangle(
-            x0 - pad_x, y0 - pad_y, x1 + pad_x, y1 + pad_y,
-            fill="#F8FBFE", outline="#00DDFF", width=1,
+            x0 - pad_x,
+            y0 - pad_y,
+            x1 + pad_x,
+            y1 + pad_y,
+            fill="#F8FBFE",
+            outline="#00DDFF",
+            width=1,
         )
         self.canvas.tag_raise(t_id, bg_id)
         self._schedule_remove([bg_id, t_id], ttl_ms)
@@ -1099,8 +1187,13 @@ class BreathingOverlay:
             x0, y0, x1, y1 = cx - 60, cy - 14, cx + 60, cy + 14
         pad_x, pad_y = 16, 8
         bg_id = self.canvas.create_rectangle(
-            x0 - pad_x, y0 - pad_y, x1 + pad_x, y1 + pad_y,
-            fill="#222831", outline="#88DDFF", width=1,
+            x0 - pad_x,
+            y0 - pad_y,
+            x1 + pad_x,
+            y1 + pad_y,
+            fill="#222831",
+            outline="#88DDFF",
+            width=1,
         )
         self.canvas.tag_raise(t_id, bg_id)
         self._schedule_remove([bg_id, t_id], ttl_ms)
@@ -1205,18 +1298,28 @@ class FloatingHUD:
 
         # 圆角背景
         self._bg_id = self._draw_round_rect(
-            0, 0, self.w, self.h, radius=10,
-            fill=self.BG_COLOR, outline="#3A4050", width=1,
+            0,
+            0,
+            self.w,
+            self.h,
+            radius=10,
+            fill=self.BG_COLOR,
+            outline="#3A4050",
+            width=1,
         )
 
         # 状态点 + Step 文本
         self._dot_id = self.canvas.create_oval(
-            12, self.DRAG_BAR_H // 2 - 5,
-            22, self.DRAG_BAR_H // 2 + 5,
-            fill="#6688FF", outline="",
+            12,
+            self.DRAG_BAR_H // 2 - 5,
+            22,
+            self.DRAG_BAR_H // 2 + 5,
+            fill="#6688FF",
+            outline="",
         )
         self.step_text_id = self.canvas.create_text(
-            32, self.DRAG_BAR_H // 2,
+            32,
+            self.DRAG_BAR_H // 2,
             text="Step 0/0",
             fill=self.FG_COLOR,
             font=(self._font_main, 9, "bold"),
@@ -1225,28 +1328,41 @@ class FloatingHUD:
 
         # 三按钮: 中止/还原主窗/关闭 HUD (位置 _relayout 会重算)
         self._btn_stop = self._make_button(
-            "■", self.w - 78, self.DRAG_BAR_H // 2, self._on_btn_stop,
-            fill="#A02828", outline="#D04040",
+            "■",
+            self.w - 78,
+            self.DRAG_BAR_H // 2,
+            self._on_btn_stop,
+            fill="#A02828",
+            outline="#D04040",
         )
-        self._btn_restore = self._make_button("□", self.w - 52, self.DRAG_BAR_H // 2, self._on_btn_restore)
-        self._btn_close = self._make_button("✕", self.w - 26, self.DRAG_BAR_H // 2, self._on_btn_close)
+        self._btn_restore = self._make_button(
+            "□", self.w - 52, self.DRAG_BAR_H // 2, self._on_btn_restore
+        )
+        self._btn_close = self._make_button(
+            "✕", self.w - 26, self.DRAG_BAR_H // 2, self._on_btn_close
+        )
 
         # 分隔线
         self._sep_id = self.canvas.create_line(
-            8, self.DRAG_BAR_H, self.w - 8, self.DRAG_BAR_H,
+            8,
+            self.DRAG_BAR_H,
+            self.w - 8,
+            self.DRAG_BAR_H,
             fill="#2A2F38",
         )
 
         # 思考标签 + 文本 (用 Canvas Text 的 width 像素自动换行)
         self._thinking_label_id = self.canvas.create_text(
-            12, self.DRAG_BAR_H + 8,
+            12,
+            self.DRAG_BAR_H + 8,
             text="思考:",
             fill=self.LABEL_COLOR,
             font=(self._font_main, 8),
             anchor="nw",
         )
         self.thinking_text_id = self.canvas.create_text(
-            48, self.DRAG_BAR_H + 8,
+            48,
+            self.DRAG_BAR_H + 8,
             text="...",
             fill=self.FG_COLOR,
             font=(self._font_main, 9),
@@ -1256,14 +1372,16 @@ class FloatingHUD:
 
         # 动作标签 + 文本
         self._action_label_id = self.canvas.create_text(
-            12, self.h - 28,
+            12,
+            self.h - 28,
             text="动作:",
             fill=self.LABEL_COLOR,
             font=(self._font_main, 8),
             anchor="nw",
         )
         self.action_text_id = self.canvas.create_text(
-            48, self.h - 28,
+            48,
+            self.h - 28,
             text="...",
             fill=self.FG_COLOR,
             font=(self._font_main, 9),
@@ -1273,16 +1391,22 @@ class FloatingHUD:
 
         # 右下角 resize grip
         self._grip_id = self.canvas.create_rectangle(
-            self.w - self.GRIP_SIZE - 2, self.h - self.GRIP_SIZE - 2,
-            self.w - 2, self.h - 2,
-            fill=self.GRIP_COLOR, outline="#888888", width=1,
+            self.w - self.GRIP_SIZE - 2,
+            self.h - self.GRIP_SIZE - 2,
+            self.w - 2,
+            self.h - 2,
+            fill=self.GRIP_COLOR,
+            outline="#888888",
+            width=1,
         )
         # 给 grip 单独绑事件
         self.canvas.tag_bind(self._grip_id, "<Button-1>", self._on_resize_press)
         self.canvas.tag_bind(self._grip_id, "<B1-Motion>", self._on_resize_motion)
         self.canvas.tag_bind(self._grip_id, "<ButtonRelease-1>", self._on_resize_release)
         try:
-            self.canvas.tag_bind(self._grip_id, "<Enter>", lambda e: self.top.configure(cursor="size_nw_se"))
+            self.canvas.tag_bind(
+                self._grip_id, "<Enter>", lambda e: self.top.configure(cursor="size_nw_se")
+            )
             self.canvas.tag_bind(self._grip_id, "<Leave>", lambda e: self.top.configure(cursor=""))
         except tk.TclError:
             pass
@@ -1336,9 +1460,7 @@ class FloatingHUD:
 
     def update_status(self, state: str, step_n: int, step_total: int) -> None:
         """更新状态点颜色 + Step N/M。线程安全。"""
-        self.root.after(
-            0, lambda s=state, n=step_n, m=step_total: self._do_update_status(s, n, m)
-        )
+        self.root.after(0, lambda s=state, n=step_n, m=step_total: self._do_update_status(s, n, m))
 
     def update_thinking(self, text: str) -> None:
         """更新思考行。Canvas 自动按像素宽度换行,过长才截。线程安全。"""
@@ -1361,6 +1483,7 @@ class FloatingHUD:
 
     def destroy(self) -> None:
         """销毁 HUD。线程安全。"""
+
         def _do():
             if self._destroyed:
                 return
@@ -1369,6 +1492,7 @@ class FloatingHUD:
                 self.top.destroy()
             except Exception:
                 pass
+
         try:
             self.root.after(0, _do)
         except Exception:
@@ -1391,8 +1515,12 @@ class FloatingHUD:
             SWP_NOACTIVATE = 0x0010
             user32 = ctypes.windll.user32
             user32.SetWindowPos(
-                self._hwnd, HWND_TOPMOST,
-                0, 0, 0, 0,
+                self._hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE,
             )
         except Exception:
@@ -1474,38 +1602,66 @@ class FloatingHUD:
     ) -> int:
         """用 polygon + smooth 模拟圆角矩形,返回 polygon id。"""
         points = [
-            x1 + radius, y1,
-            x2 - radius, y1,
-            x2, y1,
-            x2, y1 + radius,
-            x2, y2 - radius,
-            x2, y2,
-            x2 - radius, y2,
-            x1 + radius, y2,
-            x1, y2,
-            x1, y2 - radius,
-            x1, y1 + radius,
-            x1, y1,
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2,
+            y2,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            x1,
+            y1,
         ]
         return self.canvas.create_polygon(
-            points, smooth=True, fill=fill, outline=outline, width=width,
+            points,
+            smooth=True,
+            fill=fill,
+            outline=outline,
+            width=width,
         )
 
     def _round_rect_points(self, x1: int, y1: int, x2: int, y2: int, radius: int) -> list[int]:
         """计算圆角矩形 polygon 坐标列表 (12 个点, 给 canvas.coords 用)。"""
         return [
-            x1 + radius, y1,
-            x2 - radius, y1,
-            x2, y1,
-            x2, y1 + radius,
-            x2, y2 - radius,
-            x2, y2,
-            x2 - radius, y2,
-            x1 + radius, y2,
-            x1, y2,
-            x1, y2 - radius,
-            x1, y1 + radius,
-            x1, y1,
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2,
+            y2,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            x1,
+            y1,
         ]
 
     def _make_button(
@@ -1521,11 +1677,19 @@ class FloatingHUD:
         """画一个小方按钮 (背景矩形 + 文字), 返回 ids 字典。"""
         r = 10
         bg = self.canvas.create_rectangle(
-            cx - r, cy - r, cx + r, cy + r,
-            fill=fill, outline=outline, width=1,
+            cx - r,
+            cy - r,
+            cx + r,
+            cy + r,
+            fill=fill,
+            outline=outline,
+            width=1,
         )
         txt = self.canvas.create_text(
-            cx, cy, text=label, fill=self.FG_COLOR,
+            cx,
+            cy,
+            text=label,
+            fill=self.FG_COLOR,
             font=(self._font_main, 9, "bold"),
         )
         for iid in (bg, txt):
@@ -1703,8 +1867,10 @@ class FloatingHUD:
             # 右下角 grip
             self.canvas.coords(
                 self._grip_id,
-                self.w - self.GRIP_SIZE - 2, self.h - self.GRIP_SIZE - 2,
-                self.w - 2, self.h - 2,
+                self.w - self.GRIP_SIZE - 2,
+                self.h - self.GRIP_SIZE - 2,
+                self.w - 2,
+                self.h - 2,
             )
         except Exception:
             pass

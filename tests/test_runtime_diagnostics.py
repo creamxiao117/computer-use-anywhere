@@ -25,7 +25,9 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             settings,
             screenshot_probe=lambda _settings: RuntimeDiagnostic("截图", "ok", "ok"),
             desktop_probe=lambda _settings: RuntimeDiagnostic("桌面控制", "ok", "ok"),
-            browser_dom_probe=lambda _settings: RuntimeDiagnostic("浏览器 DOM", "warn", "not connected"),
+            browser_dom_probe=lambda _settings: RuntimeDiagnostic(
+                "浏览器 DOM", "warn", "not connected"
+            ),
         )
         self.assertEqual([item.name for item in checks], ["截图", "桌面控制", "浏览器 DOM"])
         self.assertEqual(checks[-1].level, "warn")
@@ -36,7 +38,9 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             settings,
             screenshot_probe=lambda _settings: RuntimeDiagnostic("截图", "ok", "ok"),
             desktop_probe=lambda _settings: RuntimeDiagnostic("桌面控制", "ok", "ok"),
-            browser_dom_probe=lambda _settings: RuntimeDiagnostic("浏览器 DOM", "error", "should not run"),
+            browser_dom_probe=lambda _settings: RuntimeDiagnostic(
+                "浏览器 DOM", "error", "should not run"
+            ),
         )
         self.assertEqual(checks[-1].name, "浏览器 DOM")
         self.assertEqual(checks[-1].level, "skip")

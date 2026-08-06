@@ -9,6 +9,7 @@ from pathlib import Path
 # winfo_screenwidth() returns logical pixels and overlay coords drift.
 try:
     import ctypes
+
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:

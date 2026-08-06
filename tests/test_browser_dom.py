@@ -20,7 +20,7 @@ class BrowserDomTests(unittest.TestCase):
         self.assertEqual(BrowserDomController._timeout_seconds({"timeout_seconds": 3}), 3.0)
 
     def test_format_json_result_parses_json_string(self) -> None:
-        result = BrowserDomController._format_json_result("结果", "{\"ok\": true}")
+        result = BrowserDomController._format_json_result("结果", '{"ok": true}')
         self.assertIn('"ok": true', result)
 
 

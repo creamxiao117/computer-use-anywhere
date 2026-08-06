@@ -34,7 +34,11 @@ def run_local_preflight(
     if settings.browser_dom_enabled:
         checks.append((browser_dom_probe or check_browser_dom)(settings))
     else:
-        checks.append(RuntimeDiagnostic("浏览器 DOM", "skip", "浏览器 DOM 工具已关闭，网页任务会只走截图操作。"))
+        checks.append(
+            RuntimeDiagnostic(
+                "浏览器 DOM", "skip", "浏览器 DOM 工具已关闭，网页任务会只走截图操作。"
+            )
+        )
     return checks
 
 

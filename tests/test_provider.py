@@ -10,7 +10,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from computer_use_anywhere.models import PROVIDER_ANTHROPIC_OFFICIAL, PROVIDER_OFFICIAL_COMPATIBLE, ProviderConfig
+from computer_use_anywhere.models import (
+    PROVIDER_ANTHROPIC_OFFICIAL,
+    PROVIDER_OFFICIAL_COMPATIBLE,
+    ProviderConfig,
+)
 from computer_use_anywhere.provider import (
     ANTHROPIC_BETA_2025_01_24,
     ANTHROPIC_BETA_2025_11_24,
@@ -65,7 +69,7 @@ class ProviderTests(unittest.TestCase):
                     "type": "function",
                     "function": {
                         "name": "computer",
-                        "arguments": "{\"action\":\"left_click\",\"coordinate\":[12,34]}",
+                        "arguments": '{"action":"left_click","coordinate":[12,34]}',
                     },
                 }
             ]
@@ -74,16 +78,28 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(parsed[0].arguments["action"], "left_click")
 
     def test_openai_tool_schema_includes_window_activation(self) -> None:
-        provider = OpenAICompatibleProvider(ProviderConfig(base_url="https://x.test", api_key="k", model="m"))
-        computer_tool = next(tool for tool in provider.build_tools(1000, 800) if tool["function"]["name"] == "computer")
+        provider = OpenAICompatibleProvider(
+            ProviderConfig(base_url="https://x.test", api_key="k", model="m")
+        )
+        computer_tool = next(
+            tool
+            for tool in provider.build_tools(1000, 800)
+            if tool["function"]["name"] == "computer"
+        )
         schema = computer_tool["function"]["parameters"]
         self.assertIn("activate_window", schema["properties"]["action"]["enum"])
         self.assertIn("window_title", schema["properties"])
         self.assertIn("expected_window_title", schema["properties"])
 
     def test_openai_tool_schema_includes_browser_dom(self) -> None:
-        provider = OpenAICompatibleProvider(ProviderConfig(base_url="https://x.test", api_key="k", model="m"))
-        browser_tool = next(tool for tool in provider.build_tools(1000, 800) if tool["function"]["name"] == "browser_dom")
+        provider = OpenAICompatibleProvider(
+            ProviderConfig(base_url="https://x.test", api_key="k", model="m")
+        )
+        browser_tool = next(
+            tool
+            for tool in provider.build_tools(1000, 800)
+            if tool["function"]["name"] == "browser_dom"
+        )
         schema = browser_tool["function"]["parameters"]
         self.assertIn("read_page", schema["properties"]["action"]["enum"])
         self.assertIn("click_selector", schema["properties"]["action"]["enum"])

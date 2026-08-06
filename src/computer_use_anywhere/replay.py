@@ -154,7 +154,14 @@ def verify_action_result(
     result = result_message or ""
     lowered_result = result.casefold()
 
-    if "失败" in result or "出错" in result or "拒绝" in result or "不可用" in result:
+    _FAILURE_ZH = ("失败", "出错", "拒绝", "不可用")
+    _FAILURE_EN = (
+        "failed", "failure", "error", "denied", "refused",
+        "unavailable", "could not", "cannot", "not permitted",
+    )
+    if any(m in result for m in _FAILURE_ZH) or any(
+        m in lowered_result for m in _FAILURE_EN
+    ):
         return ActionVerification(
             "warn", "工具返回了失败/拒绝/不可用信息，需要模型基于最新截图修正。"
         )

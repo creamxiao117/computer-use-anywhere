@@ -1,11 +1,41 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import shlex
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
+
+# 文件读写强制限制在此沙箱根目录内；可通过环境变量覆盖（必须为绝对路径）。
+_ENV_ROOT = os.environ.get("CUA_FILE_SANDBOX_ROOT", "")
+_SANDBOX_ROOT = Path(_ENV_ROOT).resolve() if _ENV_ROOT else (Path.cwd() / ".cua_sandbox")
+
+# 仅允许这些可执行名运行；其余命令一律拒绝（最小权限 + 白名单）。
+_SHELL_ALLOWLIST = frozenset(
+    {
+        "ls", "cat", "echo", "pwd", "date", "whoami", "dir",
+        "python", "python3", "pip", "git", "node", "npm", "npx",
+        "find", "grep", "head", "tail", "wc", "sort", "uniq", "type",
+        "tasklist", "ipconfig", "ping", "curl", "wget",
+    }
+)
+
+# 需要人工确认的危险命令（即便在白名单内，也要求 confirmed=True）。
+_SHELL_CONFIRM_REQUIRED = frozenset(
+    {
+        "git", "pip", "python", "python3", "node", "npm", "npx", "curl", "wget",
+    }
+)
+
+# shell 元字符/操作符：出现即视为试图绕过，拒绝执行（纵深防御）。
+_SHELL_METACHARACTERS = frozenset(";&|`$><\n(){}*?~!")
 
 
 SkillHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -154,24 +184,58 @@ def built_in_skills() -> SkillRegistry:
     registry.register(
         SkillDefinition(
             name="shell",
-            description="Run a shell command and return stdout/stderr.",
+            description=(
+                "Run a shell command and return stdout/stderr. Restricted to an "
+                "allowlist; destructive/remote commands require confirmed=true "
+                "(explicit human confirmation)."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "command": {"type": "string"},
                     "timeout": {"type": "integer", "default": 30},
+                    "confirmed": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Set true ONLY after explicit human confirmation; "
+                            "required for destructive/remote commands."
+                        ),
+                    },
                 },
                 "required": ["command"],
             },
-            handler=lambda args: _run_shell(args.get("command", ""), args.get("timeout", 30)),
+            handler=lambda args: _run_shell(
+                args.get("command", ""),
+                args.get("timeout", 30),
+                args.get("confirmed", False),
+            ),
         )
     )
     return registry
 
 
+def _safe_path(path: str) -> Path:
+    """将 path 约束在沙箱根目录内，阻止路径穿越（例如 ../../etc/passwd）。"""
+    raw = Path(path)
+    candidate = raw if raw.is_absolute() else (_SANDBOX_ROOT / raw)
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(_SANDBOX_ROOT)
+    except ValueError as exc:
+        raise ValueError(
+            f"path '{path}' escapes sandbox root '{_SANDBOX_ROOT}'; refused"
+        ) from exc
+    return resolved
+
+
 def _read_file(path: str) -> str:
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        safe = _safe_path(path)
+    except ValueError as exc:
+        return f"Error reading file: {exc}"
+    try:
+        with open(safe, encoding="utf-8") as f:
             return f.read()
     except Exception as exc:
         return f"Error reading file: {exc}"
@@ -179,24 +243,56 @@ def _read_file(path: str) -> str:
 
 def _write_file(path: str, content: str) -> dict[str, Any]:
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        safe = _safe_path(path)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    try:
+        safe.parent.mkdir(parents=True, exist_ok=True)
+        with open(safe, "w", encoding="utf-8") as f:
             f.write(content)
-        return {"message": f"Wrote {len(content)} chars to {path}."}
+        return {"message": f"Wrote {len(content)} chars to {safe}."}
     except Exception as exc:
         return {"error": str(exc)}
 
 
-def _run_shell(command: str, timeout: int) -> dict[str, Any]:
-    import subprocess
-
+def _run_shell(command: str, timeout: int, confirmed: bool = False) -> dict[str, Any]:
+    logger.info("shell.request command=%r confirmed=%s", command, confirmed)
+    if not command.strip():
+        return {"error": "empty command"}
+    # 1) 拒绝任何 shell 元字符（纵深防御；shell=False 仍保留这层）
+    if any(ch in _SHELL_METACHARACTERS for ch in command):
+        logger.warning("shell.rejected metachar command=%r", command)
+        return {"error": "command contains shell metacharacters; refused for safety"}
+    # 2) 解析为参数列表，杜绝 shell 注入（绝不启用 shell=True）
     try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=timeout
-        )
+        argv = shlex.split(command)
+    except ValueError as exc:
+        return {"error": f"cannot parse command: {exc}"}
+    if not argv:
+        return {"error": "empty command"}
+    # 3) 白名单校验可执行名
+    executable = argv[0]
+    base = executable.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    if base not in _SHELL_ALLOWLIST:
+        logger.warning("shell.rejected not-allowed executable=%r", executable)
+        return {"error": f"command '{base}' is not in the allowlist; refused"}
+    # 4) 危险命令需显式人工确认（confirmed=True）
+    if base in _SHELL_CONFIRM_REQUIRED and not confirmed:
+        logger.warning("shell.needs-confirmation executable=%r", executable)
         return {
-            "returncode": result.returncode,
-            "stdout": result.stdout[:4000],
-            "stderr": result.stderr[:2000],
+            "error": f"command '{base}' requires explicit confirmation "
+            f"(pass confirmed=true); refused"
+        }
+    # 5) 执行（shell=False，无 shell 解释）
+    try:
+        proc = subprocess.run(  # noqa: S603  # argv allowlisted + shlex.split, shell=False
+            argv, shell=False, capture_output=True, text=True, timeout=timeout
+        )
+        logger.info("shell.done rc=%s", proc.returncode)
+        return {
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[:4000],
+            "stderr": proc.stderr[:2000],
         }
     except Exception as exc:
         return {"error": str(exc)}
